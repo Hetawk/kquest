@@ -425,7 +425,7 @@
 				>
 				<span
 					>{current.points} BASE + {current.speed_scoring && current.time_limit_seconds > 0
-						? `${current.points} SPEED BONUS`
+						? `${current.speed_bonus_points ?? current.points} MAX SPEED BONUS`
 						: 'NO SPEED BONUS'}</span
 				>
 			</div>

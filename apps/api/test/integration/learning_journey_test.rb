@@ -198,6 +198,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     original_version = ActivityVersion.find_by!(share_code: original_code)
     assert_equal [ "Alpha", "Bravo" ],
       original_version.question_snapshot.map { |question| question.fetch("prompt") }
+    assert_equal 100, original_version.question_snapshot.first.fetch("speed_bonus_points")
     get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
     assert_response :success
     original_questions = response.parsed_body.dig("data", "questions")
@@ -207,6 +208,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
         prompt: "Alpha, revised",
         correct_option_id: original_questions.fetch(0).fetch("options").fetch(1).fetch("id"),
         correct_option_ids: [ original_questions.fetch(0).fetch("options").fetch(1).fetch("id") ],
+        speed_bonus_points: 500,
         time_limit_seconds: 45
       )
     ]
@@ -242,6 +244,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     revised_questions = response.parsed_body.dig("data", "questions")
     assert_equal "The Solar System, Revisited", response.parsed_body.dig("data", "title")
     assert_equal [ "Bravo", "Alpha, revised" ], revised_questions.map { |question| question.fetch("prompt") }
+    assert_equal 500, revised_questions.last.fetch("speed_bonus_points")
     assert_equal [ 30, 45 ], revised_questions.map { |question| question.fetch("time_limit_seconds") }
 
     get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
@@ -412,6 +415,45 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 100 + expected_bonus, result.fetch("score")
     assert_equal expected_bonus, result.fetch("results").first.fetch("speed_bonus")
     assert_operator response_time_ms, :>=, 0
+  end
+
+  test "speed scoring supports a separate bonus cap and equal times earn equal points" do
+    definition = question_definition(time_limit_seconds: 10).merge(
+      points: 1,
+      speed_bonus_points: 500
+    )
+    activity_id = create_activity(questions: [ definition ])
+    publication = publish_activity(activity_id)
+    question = publication_question(publication)
+    sessions = []
+
+    start_time = Time.current
+    travel_to(start_time) do
+      2.times do |index|
+        start_play_session(share_code: publication.fetch("share_code"), name: "Learner #{index + 1}")
+        assert_response :created
+        sessions << response.parsed_body.dig("data", "id")
+      end
+    end
+
+    travel_to(start_time + 5.seconds) do
+      results = sessions.map do |session_id|
+        answer_question(
+          share_code: publication.fetch("share_code"),
+          session_id:,
+          question_id: question.fetch("id"),
+          option_id: question.fetch("options")[0].fetch("id")
+        )
+        assert_response :success
+        response.parsed_body.dig("data", "attempt")
+      end
+      assert_equal [ 251, 251 ], results.map { |result| result.fetch("score") }
+      assert_equal [ 501, 501 ], results.map { |result| result.fetch("max_score") }
+      assert_equal [ 250, 250 ],
+        results.map { |result| result.fetch("results").first.fetch("speed_bonus") }
+      assert_equal [ 251, 251 ],
+        results.map { |result| result.fetch("results").first.fetch("points_awarded") }
+    end
   end
 
   test "speed scoring can be disabled and published questions can be shuffled" do

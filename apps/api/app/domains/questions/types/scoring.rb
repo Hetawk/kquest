@@ -10,8 +10,9 @@ module Questions
         time_limit = question.fetch("time_limit_seconds", SingleChoice::DEFAULT_TIME_LIMIT_SECONDS)
         return { points_awarded: base_points, speed_bonus: 0 } unless time_limit.positive?
 
-        remaining_ratio = [ 1 - (elapsed_seconds.to_f / time_limit), 0 ].max
-        bonus = (base_points * remaining_ratio).round
+        remaining_ratio = (1 - (elapsed_seconds.to_f / time_limit)).clamp(0.0, 1.0)
+        maximum_bonus = question.fetch("speed_bonus_points", base_points)
+        bonus = (maximum_bonus * remaining_ratio).round
         { points_awarded: base_points + bonus, speed_bonus: bonus }
       end
     end

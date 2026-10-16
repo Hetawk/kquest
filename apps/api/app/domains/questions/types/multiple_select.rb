@@ -1,12 +1,13 @@
 module Questions
   module Types
     class MultipleSelect
-      def self.definition_errors(prompt:, options:, correct_option_ids:, points:, time_limit_seconds:)
+      def self.definition_errors(prompt:, options:, correct_option_ids:, points:, speed_bonus_points:, time_limit_seconds:)
         errors = SingleChoice.definition_errors(
           prompt:,
           options:,
           correct_option_id: correct_option_ids.is_a?(Array) ? correct_option_ids.first : nil,
           points:,
+          speed_bonus_points:,
           time_limit_seconds:
         )
         errors.delete(:correct_option_id)

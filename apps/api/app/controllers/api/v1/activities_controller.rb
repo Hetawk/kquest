@@ -93,6 +93,7 @@ module Api
             :prompt,
             :correct_option_id,
             :points,
+            :speed_bonus_points,
             :time_limit_seconds,
             { correct_option_ids: [], options: [ :id, :text ] }
           ]
@@ -147,6 +148,7 @@ module Api
             :prompt,
             :correct_option_id,
             :points,
+            :speed_bonus_points,
             :time_limit_seconds,
             { correct_option_ids: [], options: [ :id, :text ] }
           ]
@@ -180,6 +182,8 @@ module Api
             correct_option_id: definition[:correct_option_id] || correct_option_ids.first,
             correct_option_ids:,
             points: definition[:points].nil? ? 1 : definition[:points],
+            speed_bonus_points: definition[:speed_bonus_points].nil? ?
+              Questions::Types::SingleChoice::DEFAULT_SPEED_BONUS_POINTS : definition[:speed_bonus_points],
             time_limit_seconds: definition[:time_limit_seconds] ||
               Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS
           )
@@ -224,6 +228,7 @@ module Api
               correct_option_id: question.fetch("correct_option_id"),
               correct_option_ids: question.fetch("correct_option_ids", [ question.fetch("correct_option_id") ]),
               points: question.fetch("points"),
+              speed_bonus_points: question.fetch("speed_bonus_points", question.fetch("points")),
               time_limit_seconds: question.fetch("time_limit_seconds", 30)
             }
           end
@@ -238,6 +243,7 @@ module Api
               correct_option_id: question.correct_option_id,
               correct_option_ids: question.correct_option_ids,
               points: question.points,
+              speed_bonus_points: question.speed_bonus_points,
               time_limit_seconds: question.time_limit_seconds
             }
           end

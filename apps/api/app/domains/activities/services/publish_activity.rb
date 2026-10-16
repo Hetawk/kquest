@@ -23,6 +23,7 @@ module Activities
               "correct_option_id",
               "correct_option_ids",
               "points",
+              "speed_bonus_points",
               "time_limit_seconds"
             )
           end

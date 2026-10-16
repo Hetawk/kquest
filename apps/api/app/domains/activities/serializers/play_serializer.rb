@@ -15,6 +15,7 @@ module Activities
               prompt: question.fetch("prompt"),
               question_type: question.fetch("question_type", "single_choice"),
               points: question.fetch("points"),
+              speed_bonus_points: question.fetch("speed_bonus_points", question.fetch("points")),
               speed_scoring: question.fetch("speed_scoring", false),
               time_limit_seconds: question.fetch("time_limit_seconds", 30),
               options: question.fetch("options").map do |option|

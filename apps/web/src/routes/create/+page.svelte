@@ -30,6 +30,7 @@
 			correct_option_id: firstOption,
 			correct_option_ids: [firstOption],
 			points: 1,
+			speed_bonus_points: 100,
 			time_limit_seconds: 30
 		};
 	};
@@ -89,6 +90,7 @@
 						correct_option_id: correctOptionIds[0],
 						correct_option_ids: correctOptionIds,
 						points: question.points,
+						speed_bonus_points: question.speed_bonus_points ?? question.points,
 						time_limit_seconds: question.time_limit_seconds
 					};
 				});
@@ -552,8 +554,9 @@
 					<input type="checkbox" bind:checked={speedScoring} />
 					<span
 						><strong>Reward quick correct answers</strong><small
-							>Timed correct answers earn the base points plus up to a 100% bonus based on
-							server-recorded time remaining. Incorrect and timed-out answers earn zero.</small
+							>Timed correct answers earn base points plus a per-question speed bonus that decreases
+							as the timer runs down. Equal response times earn equal bonuses. Incorrect and
+							timed-out answers earn zero.</small
 						></span
 					>
 				</label>

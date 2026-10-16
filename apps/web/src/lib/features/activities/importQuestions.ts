@@ -95,6 +95,14 @@ function questionFromRow(row: ImportRow, rowNumber: number): QuestionDraft {
 	}
 
 	const points = optionalInteger(row.points, 1, 1, 1000, rowNumber, 'points');
+	const speedBonusPoints = optionalInteger(
+		row.speed_bonus_points,
+		100,
+		0,
+		100_000,
+		rowNumber,
+		'speed_bonus_points'
+	);
 	const timeLimit = optionalInteger(
 		row.time_limit_seconds,
 		30,
@@ -115,6 +123,7 @@ function questionFromRow(row: ImportRow, rowNumber: number): QuestionDraft {
 		correct_option_id: choices[correctIndex].id,
 		correct_option_ids: [choices[correctIndex].id],
 		points,
+		speed_bonus_points: speedBonusPoints,
 		time_limit_seconds: timeLimit
 	};
 }

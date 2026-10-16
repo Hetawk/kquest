@@ -289,6 +289,111 @@ test('opens published quest editing without play-mode setup and supports deletin
 	await expect(page).toHaveURL(/\/dashboard\/quests\/quest-id$/);
 });
 
+test('quickly revises a published question timer, points, and speed bonus from the quest page', async ({
+	page
+}) => {
+	let revisionCount = 0;
+	await page.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			json: { data: { id: 'educator-id', email: 'educator@example.test', name: 'Educator' } }
+		})
+	);
+	await page.route('**/api/v1/auth/csrf', (route) =>
+		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
+	);
+	await page.route('**/api/v1/activities/quest-id', (route) =>
+		route.fulfill({
+			json: {
+				data: {
+					id: 'quest-id',
+					title: 'A published quest',
+					description: '',
+					status: 'published',
+					question_count: 1,
+					share_code: 'ABC123',
+					version: 1,
+					total_plays: 0,
+					updated_at: '2026-10-16T12:00:00Z',
+					published_at: '2026-10-16T12:00:00Z',
+					shuffle_questions: false,
+					speed_scoring: true,
+					questions: [
+						{
+							id: '10101010-1010-4101-8101-101010101001',
+							position: 1,
+							question_type: 'single_choice',
+							prompt: 'Original question',
+							options: [
+								{ id: '10101010-1010-4101-8101-101010101101', text: 'Correct answer' },
+								{ id: '10101010-1010-4101-8101-101010101102', text: 'Incorrect answer' }
+							],
+							correct_option_id: '10101010-1010-4101-8101-101010101101',
+							correct_option_ids: ['10101010-1010-4101-8101-101010101101'],
+							points: 100,
+							speed_bonus_points: 100,
+							time_limit_seconds: 30
+						}
+					]
+				}
+			}
+		})
+	);
+	await page.route('**/api/v1/activities/quest-id/revisions', async (route) => {
+		const payload = route.request().postDataJSON() as {
+			revision: {
+				expected_version: number;
+				questions: Array<{
+					points: number;
+					speed_bonus_points: number;
+					time_limit_seconds: number;
+				}>;
+			};
+		};
+		expect(payload.revision.expected_version).toBe(revisionCount + 1);
+		if (revisionCount === 0) {
+			expect(payload.revision.questions[0]).toMatchObject({
+				points: 1,
+				speed_bonus_points: 100,
+				time_limit_seconds: 30
+			});
+		} else {
+			expect(payload.revision.questions[0]).toMatchObject({
+				points: 1,
+				speed_bonus_points: 500,
+				time_limit_seconds: 15
+			});
+		}
+		revisionCount += 1;
+		const version = revisionCount + 1;
+		await route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					activity_id: 'quest-id',
+					title: 'A published quest',
+					version,
+					share_code: version === 2 ? 'NEW123' : 'NEW234',
+					play_path: version === 2 ? '/play/NEW123' : '/play/NEW234'
+				}
+			}
+		});
+	});
+
+	await page.goto('/dashboard/quests/quest-id');
+	await expect(page.getByText('Up to 30 sec timer time')).toBeVisible();
+	await page.getByRole('button', { name: 'Set all questions to 1 point' }).click();
+	await expect(page.getByText('All questions now have 1 base point')).toBeVisible();
+	await page.getByRole('button', { name: 'Edit points and timing' }).click();
+	await page.getByLabel('Points', { exact: true }).fill('1');
+	await page.getByLabel('Max speed bonus', { exact: true }).fill('500');
+	await page.getByLabel('Time limit', { exact: true }).fill('15');
+	await page.getByRole('button', { name: 'Save question settings' }).click();
+	await expect(page.getByText('1 pts', { exact: true })).toBeVisible();
+	await expect(page.getByText('Up to +500 speed bonus')).toBeVisible();
+	await expect(page.getByText('15s', { exact: true })).toBeVisible();
+	await expect(page.getByRole('status')).toContainText('version 3');
+});
+
 test('shows the created quest ID separately from its learner game code', async ({ page }) => {
 	const questId = '0199d6a6-3eb2-7b6e-9d74-d4cb14be9812';
 	await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);

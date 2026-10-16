@@ -11,6 +11,7 @@ export type QuestionDraft = {
 	correct_option_id: string;
 	correct_option_ids: string[];
 	points: number;
+	speed_bonus_points: number;
 	time_limit_seconds: number;
 };
 
@@ -19,6 +20,7 @@ export type PlayQuestion = {
 	prompt: string;
 	question_type?: 'single_choice' | 'multiple_select';
 	points: number;
+	speed_bonus_points: number;
 	time_limit_seconds: number;
 	speed_scoring: boolean;
 	options: ChoiceOption[];

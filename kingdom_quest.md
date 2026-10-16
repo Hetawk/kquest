@@ -948,9 +948,9 @@ Live-room participant answers are recorded independently against the shared roun
 
 The default speed policy is proportional and server-authoritative:
 
-`award = base_points + round(base_points * max(0, 1 - elapsed_seconds / time_limit_seconds))`
+`award = base_points + round(speed_bonus_points * clamp(1 - elapsed_seconds / time_limit_seconds, 0, 1))`
 
-This applies only to correct answers on timed questions when speed scoring is enabled. It awards the configured base at the deadline and up to a 100% speed bonus for a near-immediate answer. Untimed questions award base points only; incorrect and timed-out answers award zero. The server measures elapsed time and calculates the score; clients cannot submit a claimed score or response time. Educators can disable speed scoring. The displayed maximum for a question is twice its configured points only when it has a timer and speed scoring is enabled.
+This applies only to correct answers on timed questions when speed scoring is enabled. Each question has a base-point value and an independent maximum speed-bonus value (default 100); the bonus falls linearly from its configured maximum at the start of the timer to zero at the deadline. Equal server-measured response times receive equal bonuses. Untimed questions award base points only; incorrect and timed-out answers award zero. The server measures elapsed time and calculates the score; clients cannot submit a claimed score or response time. Educators can disable speed scoring. The displayed maximum is base points plus the configured speed bonus when the question is timed and speed scoring is enabled.
 
 Rankings sort by total points descending, then cumulative server-recorded answer time ascending, then display name as a stable final tie-break. Completed participant-paced attempts contribute to a provisional leaderboard. Host-paced room standings include current persisted scores and become final only after the host ends the last round. Results show the top three in a visual podium, with first place centered; rankings remain available below the podium. A ranking is not a substitute for reporting correctness and learning progress.
 
@@ -978,7 +978,7 @@ Production secrets remain in Launchpad's environment store.
 
 - An activity supports 1–100 single-choice questions.
 - Educators may author questions in the editor or import a CSV/XLSX workbook. Imported questions are parsed locally, capped at 5 MB and 100 rows, validated against the same question limits, and added to the editor for review and correction before publishing. Import never publishes content directly.
-- The CSV/XLSX first row uses these case-insensitive columns: `question`, `option_a`, `option_b`, optional contiguous `option_c` through `option_f`, `correct_answer`, optional `points`, and optional `time_limit_seconds`. `correct_answer` is either an option letter or an exact answer label. Points default to 1 and timers default to 30 seconds; `0` means untimed. A downloadable CSV example is included in the web app.
+- The CSV/XLSX first row uses these case-insensitive columns: `question`, `option_a`, `option_b`, optional contiguous `option_c` through `option_f`, `correct_answer`, optional `points`, `speed_bonus_points`, and `time_limit_seconds`. `correct_answer` is either an option letter or an exact answer label. Points default to 1, speed bonuses to 100, and timers to 30 seconds; `0` means untimed or no speed bonus. A downloadable CSV example is included in the web app.
 - Hosts may request shuffled question order. The order is randomized once while building the immutable published version, not on each browser refresh or between participants; question IDs, answer choices, and correct-answer mapping stay attached.
 
 The first implementation polls room state over REST and uses database-backed timestamps and records for correctness. Action Cable or another authenticated push transport can replace polling without changing the room state machine or scoring authority.

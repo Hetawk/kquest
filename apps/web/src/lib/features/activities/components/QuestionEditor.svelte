@@ -223,6 +223,24 @@
 				required
 			/>
 		</label>
+		<label class="points-label" for="speed-bonus-points-{index}">
+			<span>Max speed bonus</span>
+			<input
+				id="speed-bonus-points-{index}"
+				class="points-input"
+				type="number"
+				min="0"
+				max="100000"
+				step="1"
+				value={question.speed_bonus_points}
+				onchange={(event) =>
+					onUpdate({
+						...question,
+						speed_bonus_points: Number.parseInt(event.currentTarget.value, 10) || 0
+					})}
+				required
+			/>
+		</label>
 	</div>
 
 	<div class="timing-settings">

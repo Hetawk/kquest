@@ -72,6 +72,7 @@ module Activities
           correct_option_id = correct_option_ids.first if correct_option_id.blank?
           correct_option_id = correct_option_ids.first if question_type == "multiple_select"
           points = definition["points"]
+          speed_bonus_points = definition["speed_bonus_points"] || points
           time_limit_seconds = definition["time_limit_seconds"]
           errors = case question_type
           when "single_choice"
@@ -80,6 +81,7 @@ module Activities
               options:,
               correct_option_id:,
               points:,
+              speed_bonus_points:,
               time_limit_seconds:
             )
           when "multiple_select"
@@ -88,6 +90,7 @@ module Activities
               options:,
               correct_option_ids:,
               points:,
+              speed_bonus_points:,
               time_limit_seconds:
             )
           else
@@ -116,6 +119,7 @@ module Activities
             "correct_option_id" => correct_option_id,
             "correct_option_ids" => question_type == "multiple_select" ? correct_option_ids : [ correct_option_id ],
             "points" => points,
+            "speed_bonus_points" => speed_bonus_points,
             "time_limit_seconds" => time_limit_seconds,
             "speed_scoring" => speed_scoring
           }

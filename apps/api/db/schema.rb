@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000009) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000010) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -138,10 +138,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000009) do
     t.datetime "updated_at", null: false
     t.integer "time_limit_seconds", default: 30, null: false
     t.jsonb "correct_option_ids", default: [], null: false
+    t.integer "speed_bonus_points", default: 100, null: false
     t.index ["activity_id", "position"], name: "index_questions_on_activity_id_and_position", unique: true
     t.index ["activity_id"], name: "index_questions_on_activity_id"
     t.check_constraint "\"position\" > 0", name: "questions_position_positive"
     t.check_constraint "points >= 1 AND points <= 1000", name: "questions_points_valid"
+    t.check_constraint "speed_bonus_points >= 0 AND speed_bonus_points <= 100000", name: "questions_speed_bonus_points_valid"
     t.check_constraint "time_limit_seconds = 0 OR time_limit_seconds >= 5 AND time_limit_seconds <= 300", name: "questions_time_limit_valid"
   end
 

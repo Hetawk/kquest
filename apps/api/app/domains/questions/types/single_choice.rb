@@ -6,10 +6,12 @@ module Questions
       MAX_PROMPT_LENGTH = 500
       MAX_OPTION_LENGTH = 160
       MAX_POINTS = 1000
+      MAX_SPEED_BONUS_POINTS = 100_000
+      DEFAULT_SPEED_BONUS_POINTS = 100
       MAX_TIME_LIMIT_SECONDS = 300
       DEFAULT_TIME_LIMIT_SECONDS = 30
 
-      def self.definition_errors(prompt:, options:, correct_option_id:, points:, time_limit_seconds:)
+      def self.definition_errors(prompt:, options:, correct_option_id:, points:, speed_bonus_points:, time_limit_seconds:)
         errors = {}
         normalized_options = options.is_a?(Array) ? options : []
 
@@ -45,6 +47,9 @@ module Questions
         errors[:points] = "must be an integer between 1 and #{MAX_POINTS}" unless
           points.is_a?(Integer) && points.between?(1, MAX_POINTS)
 
+        errors[:speed_bonus_points] = "must be an integer between 0 and #{MAX_SPEED_BONUS_POINTS}" unless
+          speed_bonus_points.is_a?(Integer) && speed_bonus_points.between?(0, MAX_SPEED_BONUS_POINTS)
+
         errors[:time_limit_seconds] = "must be 0 (untimed) or between 5 and #{MAX_TIME_LIMIT_SECONDS}" unless
           time_limit_seconds.is_a?(Integer) &&
           (time_limit_seconds.zero? || time_limit_seconds.between?(5, MAX_TIME_LIMIT_SECONDS))
@@ -66,7 +71,9 @@ module Questions
 
       def self.maximum_points(question)
         timed = question.fetch("time_limit_seconds", DEFAULT_TIME_LIMIT_SECONDS).positive?
-        question.fetch("points") * (timed && question.fetch("speed_scoring", false) ? 2 : 1)
+        question.fetch("points") +
+          (timed && question.fetch("speed_scoring", false) ?
+            question.fetch("speed_bonus_points", question.fetch("points")) : 0)
       end
     end
   end

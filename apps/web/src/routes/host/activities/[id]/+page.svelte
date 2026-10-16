@@ -102,6 +102,7 @@
 				correct_option_id: options[0].id,
 				correct_option_ids: [options[0].id],
 				points: 1,
+				speed_bonus_points: 100,
 				time_limit_seconds: 30
 			}
 		];

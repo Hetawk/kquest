@@ -5,7 +5,8 @@
 	import {
 		getCreatorActivity,
 		getCurrentUser,
-		publishActivity
+		publishActivity,
+		reviseActivity
 	} from '#lib/features/activities/api.js';
 	import type { CreatorActivityDetail } from '#lib/features/activities/api.js';
 	import type { PageProps } from './$types';
@@ -17,6 +18,16 @@
 	let busy = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	let quickEditingQuestionId = $state<string | null>(null);
+	let quickPoints = $state(1);
+	let quickSpeedBonusPoints = $state(100);
+	let quickTimeLimitSeconds = $state(30);
+	const totalTimedSeconds = $derived(
+		activity?.questions.reduce((sum, question) => sum + question.time_limit_seconds, 0) ?? 0
+	);
+	const untimedQuestionCount = $derived(
+		activity?.questions.filter((question) => question.time_limit_seconds === 0).length ?? 0
+	);
 
 	onMount(() => {
 		void loadActivity();
@@ -92,6 +103,101 @@
 			? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value))
 			: 'Not published yet';
 	}
+
+	function formatDuration(totalSeconds: number) {
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		if (minutes === 0) return `${seconds} sec`;
+		return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} sec`;
+	}
+
+	function beginQuickEdit(question: CreatorActivityDetail['questions'][number]) {
+		quickEditingQuestionId = question.id;
+		quickPoints = question.points;
+		quickSpeedBonusPoints = question.speed_bonus_points ?? question.points;
+		quickTimeLimitSeconds = question.time_limit_seconds;
+	}
+
+	async function saveQuestionRevision(questions: CreatorActivityDetail['questions']) {
+		if (!activity) throw new Error('This quest is no longer available.');
+		const publication = await reviseActivity(activity.id, {
+			title: activity.title,
+			expected_version: activity.version ?? 1,
+			shuffle_questions: activity.shuffle_questions,
+			speed_scoring: activity.speed_scoring,
+			questions
+		});
+		const updatedAt = new Date().toISOString();
+		activity = {
+			...activity,
+			title: publication.title,
+			version: publication.version,
+			share_code: publication.share_code,
+			updated_at: updatedAt,
+			published_at: updatedAt,
+			questions
+		};
+		return publication;
+	}
+
+	async function saveQuickSettings(questionId: string) {
+		if (!activity || busy || activity.status !== 'published') return;
+		if (
+			!Number.isInteger(quickPoints) ||
+			quickPoints < 1 ||
+			quickPoints > 1000 ||
+			!Number.isInteger(quickSpeedBonusPoints) ||
+			quickSpeedBonusPoints < 0 ||
+			quickSpeedBonusPoints > 100_000 ||
+			!Number.isInteger(quickTimeLimitSeconds) ||
+			(quickTimeLimitSeconds !== 0 && (quickTimeLimitSeconds < 5 || quickTimeLimitSeconds > 300))
+		) {
+			error = 'Points must be 1–1,000, speed bonus 0–100,000, and time 0 or 5–300 seconds.';
+			return;
+		}
+
+		busy = true;
+		error = '';
+		notice = '';
+		try {
+			const questions = activity.questions.map((question) =>
+				question.id === questionId
+					? {
+							...question,
+							points: quickPoints,
+							speed_bonus_points: quickSpeedBonusPoints,
+							time_limit_seconds: quickTimeLimitSeconds
+						}
+					: question
+			);
+			const publication = await saveQuestionRevision(questions);
+			quickEditingQuestionId = null;
+			notice = `Question settings saved as version ${publication.version}. New game code: ${publication.share_code}. Previous versions remain unchanged.`;
+		} catch (cause) {
+			error =
+				cause instanceof Error ? cause.message : 'These question settings could not be saved.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function setAllQuestionsToOnePoint() {
+		if (!activity || busy || activity.status !== 'published') return;
+		if (activity.questions.every((question) => question.points === 1)) return;
+		busy = true;
+		error = '';
+		notice = '';
+		try {
+			const questions = activity.questions.map((question) => ({ ...question, points: 1 }));
+			const publication = await saveQuestionRevision(questions);
+			quickEditingQuestionId = null;
+			notice = `All questions now have 1 base point in version ${publication.version}. Speed-bonus caps remain unchanged; previous versions remain available on their original code.`;
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Question points could not be updated.';
+		} finally {
+			busy = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -132,6 +238,20 @@
 				<div class="quest-stats">
 					<span><strong>{activity.question_count}</strong> questions</span>
 					<span><strong>{activity.total_plays}</strong> completed plays</span>
+					<span>
+						{#if untimedQuestionCount > 0 && totalTimedSeconds === 0}
+							<strong>Untimed</strong> · no fixed completion time
+						{:else}
+							<strong
+								>{untimedQuestionCount > 0 ? 'At least ' : 'Up to '}
+								{formatDuration(totalTimedSeconds)}</strong
+							>
+							timer time
+							{#if untimedQuestionCount > 0}
+								· {untimedQuestionCount} untimed
+							{/if}
+						{/if}
+					</span>
 					<span>Published {formatDate(activity.published_at)}</span>
 				</div>
 			</div>
@@ -220,15 +340,32 @@
 					<div>
 						<p class="eyebrow">Question library</p>
 						<h2>Inside this quest</h2>
+						<p class="duration-hint">
+							Timer estimate only; actual play may be shorter{untimedQuestionCount > 0
+								? ', and untimed questions have no fixed duration.'
+								: '.'}
+						</p>
 					</div>
-					<!-- eslint-disable svelte/no-navigation-without-resolve -->
-					<a
-						class="text-link"
-						href={resolve('/host/activities/[id]', { id: activity.id }) + '?edit=true'}
-					>
-						Review and edit questions before starting <span aria-hidden="true">↗</span>
-					</a>
-					<!-- eslint-enable svelte/no-navigation-without-resolve -->
+					<div class="section-heading-actions">
+						{#if activity.status === 'published' && activity.questions.some((question) => question.points !== 1)}
+							<button
+								class="quick-edit-button"
+								type="button"
+								onclick={setAllQuestionsToOnePoint}
+								disabled={busy}
+							>
+								Set all questions to 1 point
+							</button>
+						{/if}
+						<!-- eslint-disable svelte/no-navigation-without-resolve -->
+						<a
+							class="text-link"
+							href={resolve('/host/activities/[id]', { id: activity.id }) + '?edit=true'}
+						>
+							Review and edit questions before starting <span aria-hidden="true">↗</span>
+						</a>
+						<!-- eslint-enable svelte/no-navigation-without-resolve -->
+					</div>
 				</div>
 				{#if activity.questions.length}
 					<div class="question-library">
@@ -253,8 +390,82 @@
 												: `${question.time_limit_seconds}s`}</span
 										>
 										<span>{question.points} pts</span>
+										{#if activity.speed_scoring && question.time_limit_seconds > 0}
+											<span
+												>Up to +{question.speed_bonus_points ?? question.points} speed bonus</span
+											>
+										{/if}
 									</div>
 								</div>
+								{#if activity.status === 'published'}
+									{#if quickEditingQuestionId === question.id}
+										<form
+											class="quick-settings"
+											onsubmit={(event) => {
+												event.preventDefault();
+												void saveQuickSettings(question.id);
+											}}
+										>
+											<label>
+												<span>Points</span>
+												<input
+													type="number"
+													min="1"
+													max="1000"
+													step="1"
+													bind:value={quickPoints}
+													disabled={busy}
+												/>
+											</label>
+											<label>
+												<span>Max speed bonus</span>
+												<input
+													type="number"
+													min="0"
+													max="100000"
+													step="1"
+													bind:value={quickSpeedBonusPoints}
+													disabled={busy}
+												/>
+											</label>
+											<label>
+												<span>Time limit</span>
+												<input
+													type="number"
+													min="0"
+													max="300"
+													step="1"
+													bind:value={quickTimeLimitSeconds}
+													aria-label="Time limit"
+													disabled={busy}
+												/>
+												<small>0 for untimed, or 5–300 seconds</small>
+											</label>
+											<div class="quick-settings-actions">
+												<button
+													class="button button-outline"
+													type="button"
+													onclick={() => (quickEditingQuestionId = null)}
+													disabled={busy}
+												>
+													Cancel
+												</button>
+												<button class="button button-primary" type="submit" disabled={busy}>
+													{busy ? 'Saving…' : 'Save question settings'}
+												</button>
+											</div>
+										</form>
+									{:else}
+										<button
+											class="quick-edit-button"
+											type="button"
+											onclick={() => beginQuickEdit(question)}
+											disabled={busy}
+										>
+											Edit points and timing
+										</button>
+									{/if}
+								{/if}
 								<ol
 									class="answer-preview"
 									aria-label={`Answer choices for question ${question.position}`}
@@ -413,6 +624,12 @@
 		font-size: 0.78rem;
 	}
 
+	.duration-hint {
+		margin: 0.55rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.76rem;
+	}
+
 	.quest-stats strong {
 		color: var(--navy);
 	}
@@ -494,6 +711,14 @@
 		margin: 1.6rem 0 1rem;
 	}
 
+	.section-heading-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.8rem;
+	}
+
 	.section-heading h2,
 	.overview-card h2 {
 		margin-bottom: 0;
@@ -560,6 +785,68 @@
 	.question-badges span {
 		white-space: nowrap;
 		text-transform: none;
+	}
+
+	.quick-edit-button {
+		margin-top: 0.8rem;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.76rem;
+		font-weight: 750;
+		cursor: pointer;
+	}
+
+	.quick-edit-button:disabled {
+		cursor: wait;
+		opacity: 0.55;
+	}
+
+	.quick-settings {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: end;
+		gap: 0.75rem;
+		margin-top: 0.9rem;
+		padding: 1rem;
+		border: 1px solid #e7e2d8;
+		border-radius: 0.8rem;
+		background: #faf9f6;
+	}
+
+	.quick-settings label {
+		display: grid;
+		min-width: 9rem;
+		gap: 0.35rem;
+		color: var(--ink-soft);
+		font-size: 0.72rem;
+		font-weight: 700;
+	}
+
+	.quick-settings input {
+		width: 100%;
+		min-height: 2.5rem;
+		padding: 0.5rem 0.65rem;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: white;
+		color: var(--ink);
+		font: inherit;
+		font-size: 0.84rem;
+	}
+
+	.quick-settings-actions {
+		display: flex;
+		gap: 0.45rem;
+		margin-left: auto;
+	}
+
+	.quick-settings-actions .button {
+		min-height: 2.5rem;
+		padding: 0.55rem 0.75rem;
+		font-size: 0.74rem;
 	}
 
 	.answer-preview {
@@ -734,12 +1021,22 @@
 			flex-direction: column;
 		}
 
+		.section-heading-actions {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
 		.question-badges {
 			justify-content: flex-start;
 		}
 
 		.answer-preview {
 			grid-template-columns: 1fr;
+		}
+
+		.quick-settings-actions {
+			width: 100%;
+			margin-left: 0;
 		}
 
 		.correct-label {
