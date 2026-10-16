@@ -33,6 +33,8 @@ An engaging, intelligent, accessible learning platform that empowers educators t
 - RESTful integration: APIs are resource-oriented, predictable, documented, and versioned.
 - Security by design: authorization, tenant isolation, privacy, and auditability are built in.
 - Accessible interaction: keyboard access, assistive technologies, reduced motion, and responsive layouts are fundamental requirements.
+- Respectful pacing: educators control question timers, learners can be given untimed practice, and server-side deadlines are authoritative.
+- User-controlled audio: short, original, low-volume cues enhance play without blocking access or competing with assistive technology.
 - Scalable architecture: scale through good boundaries, efficient queries, asynchronous work, and measured optimization.
 - Kingdom values: stewardship, purpose, integrity, revival, innovation, and trust should be reflected in the product's governance and user experience.
 
@@ -843,6 +845,17 @@ A future sandboxed programming exercise.
 
 Each type should declare its own definition schema, response schema, evaluation strategy, feedback behavior, maximum score, and compatibility rules.
 
+### Per-question timing
+
+- New questions default to 30 seconds. Educators may set an individual limit from 5 to 300 seconds or turn the timer off (`0`) for that question.
+- The published activity version freezes each question's time limit, so later changes cannot alter an active or already-published quest.
+- The API starts a play session and records each response in question order. The server decides whether the deadline has elapsed; a browser countdown is only a display.
+- A timed-out question is recorded as unanswered, earns zero points, and advances to the next question. A late answer cannot override the timeout.
+- The client retries session and answer requests with idempotency keys. A completed answer cannot be changed or submitted twice.
+- Immediate feedback may identify whether the submitted answer was correct, but the response does not expose answer identifiers for unanswered questions. Final answer visibility follows the activity's result policy.
+- Sessions expire after one hour; expired session records are purged after a short retry/retention window.
+- The untimed setting is required as an accessibility alternative to fixed deadlines. Any future timed mode must preserve a way to turn off or adjust its limit.
+
 New types should be addable without rewriting the assessment workflow. Some question types, especially essay and code response, require dedicated grading or sandboxing capabilities and should not be treated as simple extensions of multiple-choice scoring.
 
 ### 8.4 Game modes
@@ -1195,12 +1208,23 @@ Animations must never be the only way to communicate correctness, urgency, or st
 - Follow WCAG 2.2 AA as the baseline.
 - Support keyboard-only use and screen readers.
 - Respect `prefers-reduced-motion`.
+- Make per-question countdowns visible and understandable without announcing every second to screen readers; offer untimed questions.
+- Start audio only after the learner explicitly starts a quest, expose an immediate sound on/off control, and keep all correctness feedback available visually.
+- Stop or fade ambient audio when a quest ends or the player leaves. Audio load failures must not prevent gameplay.
+- Use original, locally generated audio cues. Keep the ambient pad quiet, ticks restrained to the final five seconds, the correct-answer chord warm, and the incorrect-answer cue soft.
 - Keep question rendering lightweight.
 - Lazy-load large media.
 - Avoid unnecessary JavaScript in the learner player.
 - Test on mobile devices and slow connections.
 - Target good Core Web Vitals at the 75th percentile.
 - Monitor real-world performance after launch.
+
+### 12.6 Audio implementation references
+
+- Howler.js documents client-side `Howl` playback, looping, volume, fades, and cleanup: <https://github.com/goldfire/howler.js#documentation>.
+- Svelte's `onMount` lifecycle does not run during server-side rendering and supports synchronous cleanup callbacks: <https://svelte.dev/docs/svelte/lifecycle-hooks>.
+- WCAG 2.2 Success Criterion 1.4.2 requires a way to pause/stop or independently control automatically playing audio longer than three seconds: <https://www.w3.org/WAI/WCAG22/Understanding/audio-control.html>.
+- WCAG 2.2 Success Criterion 2.2.1 describes turning off, adjusting, or extending time limits where possible: <https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html>.
 
 ## 13. Software Development Life Cycle (SDLC)
 

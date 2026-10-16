@@ -74,11 +74,49 @@ credentials or learner data.
 
 The first end-to-end flow supports creating and publishing a single-choice
 quest, joining by share code, answering questions, and viewing a server-graded
-result. Activity creation, publication, gameplay lookup, and attempt submission
-are deliberately available only in Rails development and test environments.
-They return `404` in production until educator authentication, organization
-authorization, and abuse protections are implemented. Do not expose this
-prototype API as a production service.
+result. Sign-in uses Google OAuth with opaque, database-backed sessions in
+encrypted, HTTP-only, same-site cookies. Google email addresses must be
+verified; account linking by matching email is deliberately not automatic.
+Activity ownership is tied to the signed-in user.
+
+OAuth and provider configuration is loaded only by the Rails server. Set
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and
+`WEB_APP_URL` in the ignored root `.env`, and register the redirect URI with
+Google. The callback must exactly match `GOOGLE_REDIRECT_URI`.
+
+New accounts enqueue a welcome message through EKDSend. Configure
+`EKDSEND_API_URL`, `EKDSEND_API_KEY`, and `FROM_EMAIL`; production mail jobs use
+Solid Queue, so run `apps/api/bin/jobs start` alongside the API.
+
+Educators can optionally upload PNG, JPEG, or WebP quest cover images (up to
+5 MB) through the authenticated Rails API proxy. Configure `ASSETS_API_URL`
+and `ASSETS_API_SECRET`. The API key identifier is not used as an upload
+credential. The Assets API secret never reaches the browser. Published cover
+images use the Assets service's public URL, so do not upload private or
+sensitive images.
+
+### Timed questions and sound
+
+Each new question defaults to 30 seconds. Educators can choose a limit from
+5–300 seconds for each question or turn that question's timer off. Published
+quests freeze these settings. The server enforces deadlines; timed-out answers
+are recorded as unanswered and score zero. The learner countdown and answer
+requests are retry-safe.
+
+The player starts its original, soft ambient audio only after the learner
+starts the quest. A sound control remains available during play; gentle ticks
+are limited to the last five seconds, and answer cues follow server feedback.
+Sound is optional, audio failures do not block play, and audio stops when the
+quest ends. Howler.js is loaded only in the browser through Svelte's mount
+lifecycle. The generated assets can be recreated with
+`python3 apps/web/scripts/generate-audio-assets.py`.
+
+The authentication foundation is live, but organization roles, educator
+authorization policies, account recovery, API rate limits, and learner abuse
+protections are not complete. Activity authoring, asset upload, gameplay
+lookup, and play sessions therefore remain available only in Rails
+development and test; they return `404` in production. Do not expose the
+prototype content APIs as a production service yet.
 
 The decorative Three.js scene is not required for gameplay and respects reduced
 motion preferences. The API contract is in [`docs/api/openapi.yaml`](./docs/api/openapi.yaml).

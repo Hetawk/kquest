@@ -1,5 +1,71 @@
 class ApplicationController < ActionController::API
+  include ActionController::Cookies
+  include ActionController::RequestForgeryProtection
+
+  protect_from_forgery with: :exception
+  rescue_from ActionController::InvalidAuthenticityToken do
+    render_error(
+      code: "invalid_csrf_token",
+      message: "Refresh the page and try again.",
+      status: :forbidden
+    )
+  end
+
   private
+
+  def current_user
+    return @current_user if defined?(@current_user)
+
+    token = cookies.encrypted[:kquest_session]
+    if token.present?
+      session_record = UserSession.active.includes(:user).find_by(
+        token_digest: Digest::SHA256.hexdigest(token)
+      )
+      @current_user = session_record&.user if session_record&.user&.active?
+      @current_session = session_record if @current_user
+    end
+    @current_user
+  end
+
+  def current_session
+    current_user
+    @current_session
+  end
+
+  def require_current_user
+    return if current_user
+
+    render_error(
+      code: "authentication_required",
+      message: "Sign in with Google to continue.",
+      status: :unauthorized
+    )
+  end
+
+  def create_user_session(user)
+    token = SecureRandom.urlsafe_base64(32)
+    user.user_sessions.create!(
+      token_digest: Digest::SHA256.hexdigest(token),
+      expires_at: 7.days.from_now
+    )
+    cookies.encrypted[:kquest_session] = {
+      value: token,
+      httponly: true,
+      secure: Rails.env.production?,
+      same_site: :lax,
+      expires: 7.days.from_now
+    }
+  end
+
+  def clear_user_session
+    current_session&.revoke!
+    cookies.delete(
+      :kquest_session,
+      httponly: true,
+      secure: Rails.env.production?,
+      same_site: :lax
+    )
+  end
 
   def render_error(code:, message:, status:, details: {})
     render(

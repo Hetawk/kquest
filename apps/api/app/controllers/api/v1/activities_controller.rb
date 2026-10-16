@@ -1,17 +1,34 @@
 module Api
   module V1
     class ActivitiesController < ApplicationController
+      before_action :prototype_api_only?
+      before_action :require_current_user
+
       def create
-        return unless prototype_api_only?
+        return unless current_user
 
         attributes = params.require(:activity).permit(
           :title,
           :description,
-          questions: [ :prompt, :correct_option_id, :points, { options: [ :id, :text ] } ]
+          :cover_image_asset_id,
+          questions: [ :prompt, :correct_option_id, :points, :time_limit_seconds, { options: [ :id, :text ] } ]
         )
         question_definitions = attributes.delete(:questions) || []
+        asset_id = attributes.delete(:cover_image_asset_id)
+        uploaded_asset = current_user.uploaded_assets.find_by(id: asset_id) if asset_id.present?
+        if asset_id.present? && !uploaded_asset
+          return render_error(
+            code: "invalid_cover_image",
+            message: "Choose a cover image that you uploaded.",
+            status: :unprocessable_entity
+          )
+        end
 
-        activity = Activity.new(title: attributes[:title], description: attributes[:description])
+        activity = current_user.activities.build(
+          title: attributes[:title],
+          description: attributes[:description],
+          uploaded_asset: uploaded_asset
+        )
         question_definitions.each_with_index do |definition, index|
           activity.questions.build(
             position: index + 1,
@@ -19,7 +36,9 @@ module Api
             prompt: definition[:prompt],
             options: definition[:options]&.map(&:to_h),
             correct_option_id: definition[:correct_option_id],
-            points: definition[:points]
+            points: definition[:points],
+            time_limit_seconds: definition[:time_limit_seconds] ||
+              Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS
           )
         end
 

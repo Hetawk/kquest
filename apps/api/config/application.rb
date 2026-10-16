@@ -26,6 +26,24 @@ module Api
     config.autoload_lib(ignore: %w[assets tasks])
     config.autoload_paths << Rails.root.join("app/domains")
     config.eager_load_paths << Rails.root.join("app/domains")
+    config.middleware.use ActionDispatch::Cookies
+    config.middleware.use ActionDispatch::Session::CookieStore,
+      key: "_kquest_api_session",
+      httponly: true,
+      same_site: :lax,
+      secure: Rails.env.production?,
+      expire_after: 10.minutes
+    config.middleware.use OmniAuth::Builder do
+      provider(
+        :google_oauth2,
+        ENV["GOOGLE_CLIENT_ID"],
+        ENV["GOOGLE_CLIENT_SECRET"],
+        scope: "email,profile",
+        prompt: "select_account",
+        access_type: "online",
+        redirect_uri: ENV["GOOGLE_REDIRECT_URI"]
+      )
+    end
 
     # Configuration for the application, engines, and railties goes here.
     #

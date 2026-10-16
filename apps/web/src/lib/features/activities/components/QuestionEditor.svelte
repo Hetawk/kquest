@@ -80,11 +80,47 @@
 				max="1000"
 				step="25"
 				value={question.points}
-				oninput={(event) =>
+				onchange={(event) =>
 					onUpdate({ ...question, points: Number.parseInt(event.currentTarget.value, 10) || 0 })}
 				required
 			/>
 		</label>
+	</div>
+
+	<div class="timing-settings">
+		<label class="timer-toggle">
+			<input
+				type="checkbox"
+				checked={question.time_limit_seconds === 0}
+				onchange={(event) =>
+					onUpdate({
+						...question,
+						time_limit_seconds: event.currentTarget.checked ? 0 : 30
+					})}
+			/>
+			<span>No time limit</span>
+		</label>
+		{#if question.time_limit_seconds > 0}
+			<label class="points-label" for="time-limit-{index}">
+				<span>Time limit (seconds)</span>
+				<input
+					id="time-limit-{index}"
+					class="points-input"
+					type="number"
+					min="5"
+					max="300"
+					step="1"
+					value={question.time_limit_seconds}
+					oninput={(event) =>
+						onUpdate({
+							...question,
+							time_limit_seconds: Number.parseInt(event.currentTarget.value, 10) || 0
+						})}
+					required
+				/>
+			</label>
+		{/if}
+		<p class="field-hint">Choose 5–300 seconds, or allow learners to work at their own pace.</p>
 	</div>
 </fieldset>
 
@@ -166,6 +202,27 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
+	}
+
+	.timing-settings {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 0.85rem;
+	}
+
+	.timer-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		color: var(--ink-soft);
+		font-size: 0.78rem;
+		font-weight: 700;
+	}
+
+	.timer-toggle input {
+		accent-color: var(--navy);
 	}
 
 	.option-heading {
@@ -274,6 +331,11 @@
 
 		.question-footer .field-hint {
 			max-width: 12rem;
+		}
+
+		.timing-settings {
+			align-items: flex-start;
+			flex-direction: column;
 		}
 	}
 </style>

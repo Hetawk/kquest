@@ -19,7 +19,7 @@ module Assessments
           response = normalized_responses.find { |item| item.fetch("question_id") == question.fetch("id") }
           Questions::Types::SingleChoice.score(
             question: question,
-            selected_option_id: response.fetch("option_id")
+            selected_option_id: response["option_id"]
           )
         end
         max_score = snapshots.sum { |question| question.fetch("points") }
@@ -50,7 +50,8 @@ module Assessments
           question_id = response["question_id"]
           option_id = response["option_id"]
           question = snapshots.find { |item| item.fetch("id") == question_id }
-          raise InvalidResponses unless question && question.fetch("options").any? { |option| option.fetch("id") == option_id }
+          raise InvalidResponses unless question
+          raise InvalidResponses if option_id && !question.fetch("options").any? { |option| option.fetch("id") == option_id }
 
           { "question_id" => question_id, "option_id" => option_id }
         end

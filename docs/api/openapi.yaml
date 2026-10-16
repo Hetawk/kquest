@@ -3,9 +3,10 @@ info:
   title: KINGDOM Quest API
   version: 1.0.0
   description: >-
-    Versioned REST API for KINGDOM Quest. The learning-journey prototype
-    endpoints are enabled only in development and test until authentication,
-    authorization, and abuse protections are implemented.
+    Versioned REST API for KINGDOM Quest. Google OAuth uses an HTTP-only
+    session cookie; state-changing requests require a Rails CSRF token.
+    Content, upload, and learner-play prototype endpoints remain development
+    and test only until roles and abuse protections are complete.
 servers:
   - url: /api/v1
 paths:
@@ -24,11 +25,132 @@ paths:
                 data:
                   status: ok
                   api_version: v1
+  /auth/csrf:
+    get:
+      operationId: getCsrfToken
+      summary: Get a token for same-origin state-changing requests
+      responses:
+        "200":
+          description: Rails CSRF token bound to the current browser session.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      $ref: "#/components/schemas/CsrfToken"
+  /auth/google_oauth2:
+    post:
+      operationId: startGoogleSignIn
+      summary: Start Google OAuth sign-in
+      description: Submit a same-origin form; the Rails OAuth CSRF middleware validates the token.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [authenticity_token]
+              properties:
+                  authenticity_token:
+                    type: string
+      responses:
+        "302":
+          description: Redirect to Google or the configured OAuth failure handler.
+        "403":
+          description: The Rails CSRF token is missing or invalid.
+  /auth/google_oauth2/callback:
+    get:
+      operationId: completeGoogleSignIn
+      summary: Complete Google OAuth callback
+      description: Google redirects here; only verified Google email identities are accepted.
+      responses:
+        "303":
+          description: Redirect to the configured web application.
+          headers:
+            Set-Cookie:
+              schema:
+                  type: string
+              description: Encrypted, HTTP-only, same-site session cookie.
+  /auth/session:
+    delete:
+      operationId: destroyCurrentSession
+      summary: Revoke the current sign-in session
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Session revoked and cookie cleared.
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+  /me:
+    get:
+      operationId: getCurrentUser
+      summary: Get the signed-in user profile
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+  /assets/upload:
+    post:
+      operationId: uploadQuestCover
+      summary: Upload a quest cover image to EKD Digital Assets
+      description: Authenticated development/test prototype endpoint. Accepts a single PNG, JPEG, or WebP file up to 5 MB.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                  file:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          description: Uploaded image associated with the current user.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      $ref: "#/components/schemas/UploadedAsset"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "502":
+          description: EKD Digital Assets rejected the upload or was unavailable.
   /activities:
     post:
       operationId: createActivity
       summary: Create a draft activity
-      description: Development/test prototype endpoint; unavailable in production.
+      description: Authenticated, user-owned development/test prototype endpoint; unavailable in production.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
       requestBody:
         required: true
         content:
@@ -45,6 +167,9 @@ paths:
                         type: string
                       description:
                         type: string
+                      cover_image_asset_id:
+                        type: string
+                        format: uuid
                       questions:
                         type: array
                         items:
@@ -76,6 +201,8 @@ paths:
                           const: draft
         "422":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
   /activities/{activity_id}/publications:
     parameters:
       - name: activity_id
@@ -87,7 +214,11 @@ paths:
     post:
       operationId: publishActivity
       summary: Publish an immutable activity version
-      description: Development/test prototype endpoint; unavailable in production.
+      description: Authenticated, owner-scoped development/test prototype endpoint; unavailable in production.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
       responses:
         "201":
           description: Published version and learner share code.
@@ -113,6 +244,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
   /play/{share_code}:
     parameters:
       - $ref: "#/components/parameters/ShareCode"
@@ -133,14 +266,15 @@ paths:
                       $ref: "#/components/schemas/PlayActivity"
         "404":
           $ref: "#/components/responses/NotFound"
-  /play/{share_code}/attempts:
+  /play/{share_code}/sessions:
     parameters:
       - $ref: "#/components/parameters/ShareCode"
     post:
-      operationId: submitAttempt
-      summary: Submit answers and receive a server-graded result
-      description: Development/test prototype endpoint; unavailable in production.
+      operationId: startPlaySession
+      summary: Start a server-timed learner session
+      description: Creates an idempotent play session and starts the first question's server-side timer.
       parameters:
+        - $ref: "#/components/parameters/CsrfToken"
         - name: Idempotency-Key
           in: header
           required: true
@@ -153,49 +287,103 @@ paths:
           application/json:
             schema:
               type: object
-              required: [attempt]
+              required: [play_session]
               properties:
-                  attempt:
+                  play_session:
                     type: object
-                    required: [learner_name, responses]
+                    required: [learner_name]
                     properties:
                       learner_name:
                         type: string
                         minLength: 1
                         maxLength: 80
-                      responses:
-                        type: array
-                        items:
-                          type: object
-                          required: [question_id, option_id]
-                          properties:
-                            question_id:
-                              type: string
-                              format: uuid
-                            option_id:
-                              type: string
-                              format: uuid
       responses:
         "201":
-          description: Attempt accepted and graded.
+          description: Play session created.
           content:
             application/json:
               schema:
-                  type: object
-                  required: [data]
-                  properties:
-                    data:
-                      $ref: "#/components/schemas/AttemptResult"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlaySession"
         "200":
-          description: Previously accepted attempt returned for an idempotent retry.
+          description: Existing session returned for an idempotent retry.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /play/{share_code}/sessions/{session_id}/answers:
+    parameters:
+      - $ref: "#/components/parameters/ShareCode"
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: answerPlayQuestion
+      summary: Record an answer or a server-confirmed timeout
+      description: Advances one question in order. Expired answers are recorded as unanswered and score zero.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer]
+              properties:
+                answer:
+                  type: object
+                  required: [question_id]
+                  properties:
+                    question_id:
+                      type: string
+                      format: uuid
+                    option_id:
+                      type: [string, "null"]
+                      format: uuid
+                      description: Null is accepted only after the server-side deadline has passed.
+      responses:
+        "200":
+          description: Question accepted; returns the next timer or the completed attempt.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlaySessionProgress"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: Idempotency key was reused with different answers.
+          description: Request key conflict or timeout has not yet elapsed.
         "422":
           $ref: "#/components/responses/ValidationError"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: kquest_session
   parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
     ShareCode:
       name: share_code
       in: path
@@ -204,6 +392,12 @@ components:
         type: string
         pattern: "^[A-HJ-NP-Z2-9]{12}$"
   responses:
+    AuthenticationError:
+      description: Sign-in is required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     NotFound:
       description: Resource not found or unavailable in this environment.
       content:
@@ -217,6 +411,40 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    CsrfToken:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    UserProfile:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+    UploadedAsset:
+      type: object
+      required: [id, public_url, content_type, file_size]
+      properties:
+        id:
+          type: string
+          format: uuid
+        public_url:
+          type: string
+          format: uri
+        content_type:
+          type: string
+          enum: [image/jpeg, image/png, image/webp]
+        file_size:
+          type: integer
+          maximum: 5242880
     HealthResponse:
       type: object
       required:
@@ -254,6 +482,17 @@ components:
           type: integer
           minimum: 1
           maximum: 1000
+        time_limit_seconds:
+          $ref: "#/components/schemas/QuestionTimeLimitSeconds"
+          default: 30
+    QuestionTimeLimitSeconds:
+      description: Zero disables the per-question timer; otherwise 5–300 seconds.
+      anyOf:
+        - type: integer
+          const: 0
+        - type: integer
+          minimum: 5
+          maximum: 300
     ChoiceOption:
       type: object
       required: [id, text]
@@ -266,7 +505,7 @@ components:
           maxLength: 160
     PlayActivity:
       type: object
-      required: [id, title, share_code, questions]
+      required: [id, title, share_code, cover_image_url, questions]
       properties:
         id:
           type: string
@@ -275,11 +514,13 @@ components:
           type: string
         share_code:
           type: string
+        cover_image_url:
+          type: [string, "null"]
         questions:
           type: array
           items:
             type: object
-            required: [id, prompt, points, options]
+            required: [id, prompt, points, time_limit_seconds, options]
             properties:
               id:
                 type: string
@@ -288,10 +529,72 @@ components:
                 type: string
               points:
                 type: integer
+              time_limit_seconds:
+                $ref: "#/components/schemas/QuestionTimeLimitSeconds"
               options:
                 type: array
                 items:
                   $ref: "#/components/schemas/ChoiceOption"
+    PlaySession:
+      type: object
+      required:
+        - id
+        - question_index
+        - time_limit_seconds
+        - time_remaining_seconds
+        - question_started_at
+        - server_time
+      properties:
+        id:
+          type: string
+          format: uuid
+        question_index:
+          type: integer
+          minimum: 0
+        time_limit_seconds:
+          $ref: "#/components/schemas/QuestionTimeLimitSeconds"
+        time_remaining_seconds:
+          type: number
+          minimum: 0
+        question_started_at:
+          type: string
+          format: date-time
+        server_time:
+          type: string
+          format: date-time
+    PlaySessionProgress:
+      type: object
+      required: [complete, is_correct, timed_out]
+      properties:
+        complete:
+          type: boolean
+        is_correct:
+          type: boolean
+          description: Correctness of only the submitted answer; answer identifiers are withheld until completion.
+        timed_out:
+          type: boolean
+        question_index:
+          type: integer
+          minimum: 0
+        time_limit_seconds:
+          $ref: "#/components/schemas/QuestionTimeLimitSeconds"
+        question_started_at:
+          type: string
+          format: date-time
+        server_time:
+          type: string
+          format: date-time
+        attempt:
+          $ref: "#/components/schemas/AttemptResult"
+      oneOf:
+        - required: [complete, question_index, time_limit_seconds, question_started_at, server_time]
+          properties:
+            complete:
+              const: false
+        - required: [complete, attempt]
+          properties:
+            complete:
+              const: true
     AttemptResult:
       type: object
       required: [id, learner_name, score, max_score, results]
@@ -314,6 +617,7 @@ components:
               - prompt
               - selected_option_id
               - correct_option_id
+              - timed_out
               - points_awarded
               - points_possible
             properties:
@@ -323,11 +627,13 @@ components:
               prompt:
                 type: string
               selected_option_id:
-                type: string
+                type: [string, "null"]
                 format: uuid
               correct_option_id:
                 type: string
                 format: uuid
+              timed_out:
+                type: boolean
               points_awarded:
                 type: integer
               points_possible:

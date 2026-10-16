@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
+	import { getCsrfToken, getCurrentUser, signOut } from '#lib/features/activities/api.js';
 	import '../app.css';
 	import '@fontsource-variable/dm-sans';
 	import '@fontsource-variable/manrope';
@@ -7,6 +9,48 @@
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
+	let currentUser = $state<Awaited<ReturnType<typeof getCurrentUser>>>(null);
+	let csrfToken = $state('');
+	let authError = $state('');
+	let authNotice = $state('');
+
+	onMount(() => {
+		const status = new URLSearchParams(window.location.search).get('auth');
+		authNotice =
+			status === 'signed_in'
+				? 'You are signed in with Google.'
+				: status === 'account_conflict'
+					? 'That email is already linked to another sign-in. Contact support to connect accounts.'
+					: status === 'account_suspended'
+						? 'This account is not currently active.'
+						: status === 'google_sign_in_failed'
+							? 'Google sign-in did not complete. Please try again.'
+							: '';
+
+		void Promise.all([getCurrentUser(), getCsrfToken()])
+			.then(([user, token]) => {
+				currentUser = user;
+				csrfToken = token;
+			})
+			.catch((error: unknown) => {
+				authError =
+					error instanceof Error
+						? error.message
+						: 'Authentication services are temporarily unavailable.';
+			});
+	});
+
+	async function handleSignOut() {
+		authError = '';
+		try {
+			await signOut();
+			currentUser = null;
+			authNotice = 'You have signed out.';
+			csrfToken = await getCsrfToken();
+		} catch (error) {
+			authError = error instanceof Error ? error.message : 'Could not safely end this session.';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -29,11 +73,31 @@
 			<a href={resolve('/join')}>Join a game</a>
 		</nav>
 
-		<a class="header-cta" href={resolve('/create')}
-			>Start creating <span aria-hidden="true">↗</span></a
-		>
+		{#if currentUser}
+			<div class="account-actions">
+				<span class="account-name">{currentUser.name}</span>
+				<button class="header-cta" type="button" onclick={handleSignOut}>Sign out</button>
+			</div>
+		{:else}
+			<form class="google-sign-in" action="/api/v1/auth/google_oauth2" method="post">
+				<input type="hidden" name="authenticity_token" value={csrfToken} />
+				<button class="header-cta" type="submit" disabled={!csrfToken}>
+					Continue with Google <span aria-hidden="true">↗</span>
+				</button>
+			</form>
+		{/if}
 	</div>
 </header>
+
+{#if authNotice || authError}
+	<div
+		class:auth-error={authError}
+		class="auth-status page-shell"
+		role={authError ? 'alert' : 'status'}
+	>
+		{authError || authNotice}
+	</div>
+{/if}
 
 {@render children()}
 
@@ -122,6 +186,35 @@
 		transition:
 			border-color 150ms ease,
 			transform 150ms ease;
+		cursor: pointer;
+	}
+
+	.header-cta:disabled {
+		cursor: wait;
+		opacity: 0.65;
+	}
+
+	.google-sign-in,
+	.account-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.account-name {
+		color: var(--ink-soft);
+		font-size: 0.82rem;
+		font-weight: 600;
+	}
+
+	.auth-status {
+		padding-top: 0.7rem;
+		color: var(--navy);
+		font-size: 0.85rem;
+	}
+
+	.auth-error {
+		color: #a32727;
 	}
 
 	.header-cta:hover {
@@ -149,6 +242,11 @@
 		}
 
 		.header-cta {
+			padding: 0.62rem 0.72rem;
+			font-size: 0.72rem;
+		}
+
+		.account-name {
 			display: none;
 		}
 	}

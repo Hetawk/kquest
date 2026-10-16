@@ -1,10 +1,13 @@
 module Api
   module V1
     class PublicationsController < ApplicationController
-      def create
-        return unless prototype_api_only?
+      before_action :prototype_api_only?
+      before_action :require_current_user
 
-        activity = Activity.find_by(id: params[:activity_id])
+      def create
+        return unless current_user
+
+        activity = current_user.activities.find_by(id: params[:activity_id])
         return render_not_found unless activity
 
         version = Activities::Services::PublishActivity.call(activity: activity)

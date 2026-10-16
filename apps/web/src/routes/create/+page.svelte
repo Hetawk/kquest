@@ -1,8 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import QuestionEditor from '#lib/features/activities/components/QuestionEditor.svelte';
-	import { createActivity, publishActivity } from '#lib/features/activities/api.js';
+	import {
+		createActivity,
+		getCurrentUser,
+		publishActivity,
+		uploadCoverImage
+	} from '#lib/features/activities/api.js';
 	import type { PublishedActivity, QuestionDraft } from '#lib/features/activities/types.js';
 
 	const makeQuestion = (): QuestionDraft => {
@@ -16,7 +22,8 @@
 				{ id: crypto.randomUUID(), text: '' }
 			],
 			correct_option_id: firstOption,
-			points: 100
+			points: 100,
+			time_limit_seconds: 30
 		};
 	};
 
@@ -27,6 +34,23 @@
 	let saving = $state(false);
 	let published = $state<PublishedActivity | null>(null);
 	let copied = $state(false);
+	let authChecking = $state(true);
+	let signedIn = $state(false);
+	let coverImage = $state<{ id: string; public_url: string } | null>(null);
+	let coverUploading = $state(false);
+
+	onMount(() => {
+		void getCurrentUser()
+			.then((user) => {
+				signedIn = user !== null;
+			})
+			.catch((cause: unknown) => {
+				error = cause instanceof Error ? cause.message : 'Could not verify your sign-in.';
+			})
+			.finally(() => {
+				authChecking = false;
+			});
+	});
 
 	function updateQuestion(index: number, question: QuestionDraft) {
 		questions[index] = question;
@@ -34,18 +58,50 @@
 
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
-		if (saving) return;
+		if (saving || coverUploading) return;
 
 		error = '';
 		saving = true;
 
 		try {
-			const activity = await createActivity({ title, description, questions });
+			const activity = await createActivity({
+				title,
+				description,
+				questions,
+				...(coverImage ? { cover_image_asset_id: coverImage.id } : {})
+			});
 			published = await publishActivity(activity.id);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Your quest could not be published.';
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function handleCoverSelected(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		error = '';
+		if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+			error = 'Choose a PNG, JPEG, or WebP image.';
+			input.value = '';
+			return;
+		}
+		if (file.size > 5 * 1024 * 1024) {
+			error = 'Cover images must be 5 MB or smaller.';
+			input.value = '';
+			return;
+		}
+
+		coverUploading = true;
+		try {
+			coverImage = await uploadCoverImage(file);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'The cover image could not be uploaded.';
+		} finally {
+			coverUploading = false;
 		}
 	}
 
@@ -71,7 +127,22 @@
 </svelte:head>
 
 <main class="page-shell create-page">
-	{#if published}
+	{#if authChecking}
+		<section class="published-card" aria-live="polite">
+			<p class="eyebrow">Your learning studio</p>
+			<h1>Checking your sign-in…</h1>
+		</section>
+	{:else if !signedIn}
+		<section class="published-card" aria-labelledby="signin-title">
+			<p class="eyebrow">Your learning studio</p>
+			<h1 id="signin-title">Sign in to create a quest.</h1>
+			<p class="published-copy">
+				Use your Google account to save and manage the learning activities you create.
+			</p>
+			<a class="button button-primary" href={resolve('/')}>Sign in with Google</a>
+			{#if error}<p class="error-message" role="alert">{error}</p>{/if}
+		</section>
+	{:else if published}
 		<section class="published-card" aria-labelledby="published-title">
 			<div class="published-icon" aria-hidden="true">✦</div>
 			<p class="eyebrow">Your quest is out in the world</p>
@@ -141,6 +212,31 @@
 					maxlength="500"
 					placeholder="What will learners explore?"
 					bind:value={description}></textarea>
+
+				<label class="field-label description-label" for="cover-image">
+					Quest cover <span>(optional)</span>
+				</label>
+				<p class="field-hint" id="cover-image-hint">
+					Add a PNG, JPEG, or WebP image up to 5 MB. Cover images are publicly visible to anyone
+					with a published quest.
+				</p>
+				<input
+					id="cover-image"
+					class="text-input"
+					type="file"
+					accept="image/png,image/jpeg,image/webp"
+					aria-describedby="cover-image-hint"
+					onchange={handleCoverSelected}
+					disabled={coverUploading || saving}
+				/>
+				{#if coverUploading}
+					<p class="field-hint" role="status">Uploading your cover image…</p>
+				{:else if coverImage}
+					<img class="cover-preview" src={coverImage.public_url} alt="Quest cover preview" />
+					<button class="back-link" type="button" onclick={() => (coverImage = null)}>
+						Remove cover
+					</button>
+				{/if}
 			</section>
 
 			<section class="questions-section" aria-labelledby="questions-heading">
@@ -185,8 +281,8 @@
 				</button>
 			</div>
 			<p class="prototype-note">
-				Prototype note: educator sign-in and organization permissions are still in development.
-				Authoring is only enabled in development and test environments.
+				Prototype note: your quest is saved to your account. Organization roles and classroom
+				sharing are still in development.
 			</p>
 		</form>
 	{/if}
@@ -271,6 +367,22 @@
 	.activity-details > .text-input {
 		padding: 0.85rem 1rem;
 		font-size: 0.9rem;
+	}
+
+	.field-hint {
+		margin: -0.45rem 0 0.7rem;
+		color: var(--ink-muted);
+		font-size: 0.76rem;
+		line-height: 1.55;
+	}
+
+	.cover-preview {
+		display: block;
+		width: min(100%, 30rem);
+		max-height: 16rem;
+		margin-top: 0.75rem;
+		border-radius: 0.8rem;
+		object-fit: cover;
 	}
 
 	.activity-details textarea {

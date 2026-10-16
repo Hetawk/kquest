@@ -1,8 +1,16 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { fetchActivity, submitAttempt } from '#lib/features/activities/api.js';
-	import type { AttemptResult, PlayActivity } from '#lib/features/activities/types.js';
+	import {
+		answerPlayQuestion,
+		fetchActivity,
+		startPlaySession
+	} from '#lib/features/activities/api.js';
+	import type {
+		AttemptResult,
+		PlayActivity,
+		PlaySessionProgress
+	} from '#lib/features/activities/types.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -10,64 +18,155 @@
 	let attempt = $state<AttemptResult | null>(null);
 	let learnerName = $state('');
 	let currentQuestion = $state(0);
-	let answers = $state<Record<string, string>>({});
+	let selectedOptionId = $state('');
 	let loading = $state(true);
 	let submitting = $state(false);
+	let starting = $state(false);
 	let started = $state(false);
 	let error = $state('');
-	let submissionKey = $state('');
-	let lockedPayload:
-		| {
-				learnerName: string;
-				responses: { question_id: string; option_id: string }[];
-		  }
-		| undefined;
+	let playSessionId = $state('');
+	let secondsRemaining = $state(0);
+	let soundEnabled = $state(true);
+	let audioUnavailable = $state(false);
+	let feedbackMessage = $state('');
+	let pendingOptionId = $state<string | null | undefined>(undefined);
+	let sessionStartKey = $state('');
+	let sessionLearnerName = '';
+	let answerRequestKey = '';
+	let deadlineAt = 0;
+	let timeoutSubmittedForIndex = -1;
+	let lastTickSecond = -1;
+	let gameAudio: import('#lib/features/audio/GameAudio.js').GameAudio | null = null;
 
-	onMount(async () => {
-		try {
-			activity = await fetchActivity(data.shareCode);
-		} catch (cause) {
-			error =
-				cause instanceof Error
-					? cause.message
-					: 'We couldn’t find that game. Check the code and try again.';
-		} finally {
-			loading = false;
-		}
+	onMount(() => {
+		let disposed = false;
+		const timer = window.setInterval(() => {
+			if (!started || !current || !current.time_limit_seconds || attempt) return;
+
+			const remaining = Math.max(0, Math.ceil((deadlineAt - performance.now()) / 1000));
+			secondsRemaining = remaining;
+			if (remaining > 0 && remaining <= 5 && remaining !== lastTickSecond) {
+				lastTickSecond = remaining;
+				gameAudio?.playTick();
+			}
+			if (
+				remaining === 0 &&
+				pendingOptionId === undefined &&
+				timeoutSubmittedForIndex !== currentQuestion
+			) {
+				timeoutSubmittedForIndex = currentQuestion;
+				void submitAnswer(null);
+			}
+		}, 200);
+
+		void import('#lib/features/audio/GameAudio.js')
+			.then(({ GameAudio }) => {
+				if (disposed) return;
+				gameAudio = new GameAudio(() => (audioUnavailable = true));
+				audioUnavailable = false;
+				if (!soundEnabled) gameAudio.setEnabled(false);
+				if (started) gameAudio.start();
+			})
+			.catch(() => {
+				audioUnavailable = true;
+			});
+
+		void fetchActivity(data.shareCode)
+			.then((result) => {
+				activity = result;
+			})
+			.catch((cause: unknown) => {
+				error =
+					cause instanceof Error
+						? cause.message
+						: 'We couldn’t find that game. Check the code and try again.';
+			})
+			.finally(() => {
+				loading = false;
+			});
+
+		return () => {
+			disposed = true;
+			window.clearInterval(timer);
+			gameAudio?.dispose();
+			gameAudio = null;
+		};
 	});
 
-	function beginGame(event: SubmitEvent) {
+	async function beginGame(event: SubmitEvent) {
 		event.preventDefault();
 		learnerName = learnerName.trim();
-		if (learnerName.length > 0 && learnerName.length <= 80) {
+		if (!activity || learnerName.length === 0 || learnerName.length > 80 || starting) return;
+
+		if (!sessionStartKey) {
+			sessionStartKey = crypto.randomUUID();
+			sessionLearnerName = learnerName;
+		}
+		starting = true;
+		error = '';
+		gameAudio?.start();
+		const requestStartedAt = performance.now();
+		try {
+			const session = await startPlaySession({
+				shareCode: activity.share_code,
+				learnerName: sessionLearnerName,
+				idempotencyKey: sessionStartKey
+			});
+			playSessionId = session.id;
+			currentQuestion = session.question_index;
 			started = true;
-			error = '';
+			setQuestionClock(
+				session.time_limit_seconds,
+				session.time_remaining_seconds,
+				requestStartedAt
+			);
+			gameAudio?.start();
+		} catch (cause) {
+			gameAudio?.stopAmbient();
+			error = cause instanceof Error ? cause.message : 'The quest could not be started.';
+		} finally {
+			starting = false;
 		}
 	}
 
-	async function finishGame() {
-		if (!activity || submitting || !allQuestionsAnswered) return;
-
-		if (!submissionKey) {
-			submissionKey = crypto.randomUUID();
-			lockedPayload = {
-				learnerName,
-				responses: activity.questions.map((question) => ({
-					question_id: question.id,
-					option_id: answers[question.id]
-				}))
-			};
-		}
-
+	async function submitAnswer(optionId: string | null) {
+		if (!activity || !current || !playSessionId || submitting || attempt) return;
+		const submittedOptionId = pendingOptionId === undefined ? optionId : pendingOptionId;
+		pendingOptionId = submittedOptionId;
 		submitting = true;
 		error = '';
+		const requestStartedAt = performance.now();
+		if (!answerRequestKey) answerRequestKey = crypto.randomUUID();
 		try {
-			attempt = await submitAttempt({
+			const progress: PlaySessionProgress = await answerPlayQuestion({
 				shareCode: activity.share_code,
-				learnerName: lockedPayload!.learnerName,
-				responses: lockedPayload!.responses,
-				idempotencyKey: submissionKey
+				sessionId: playSessionId,
+				questionId: current.id,
+				optionId: submittedOptionId,
+				idempotencyKey: answerRequestKey
 			});
+			if (!progress.timed_out) gameAudio?.playAnswerCue(progress.is_correct);
+			feedbackMessage = progress.timed_out
+				? 'Time ran out for that question. Keep going.'
+				: progress.is_correct
+					? 'That’s right. Well done.'
+					: 'Not quite. Keep going; every question is a chance to learn.';
+
+			if (progress.complete) {
+				attempt = progress.attempt;
+				gameAudio?.stopAmbient();
+			} else {
+				currentQuestion = progress.question_index;
+				selectedOptionId = '';
+				setQuestionClock(
+					progress.time_limit_seconds,
+					progress.time_limit_seconds,
+					requestStartedAt
+				);
+			}
+			pendingOptionId = undefined;
+			answerRequestKey = '';
+			error = '';
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Your answers could not be submitted.';
 		} finally {
@@ -75,10 +174,28 @@
 		}
 	}
 
+	function setQuestionClock(timeLimit: number, remaining: number, requestStartedAt: number) {
+		if (timeLimit === 0) {
+			deadlineAt = 0;
+			secondsRemaining = 0;
+			return;
+		}
+
+		const elapsedRequestSeconds = (performance.now() - requestStartedAt) / 2000;
+		const adjustedRemaining = Math.max(0, remaining - elapsedRequestSeconds);
+		deadlineAt = performance.now() + adjustedRemaining * 1000;
+		secondsRemaining = Math.ceil(adjustedRemaining);
+		lastTickSecond = -1;
+		timeoutSubmittedForIndex = -1;
+	}
+
+	function toggleSound() {
+		soundEnabled = !soundEnabled;
+		gameAudio?.setEnabled(soundEnabled);
+	}
+
 	const current = $derived(activity?.questions[currentQuestion]);
-	const allQuestionsAnswered = $derived(
-		activity !== null && activity.questions.every((question) => Boolean(answers[question.id]))
-	);
+	const questionExpired = $derived(Boolean(current?.time_limit_seconds && secondsRemaining === 0));
 	const percent = $derived(
 		activity && current ? Math.round(((currentQuestion + 1) / activity.questions.length) * 100) : 0
 	);
@@ -129,16 +246,22 @@
 						<span
 							class="review-marker"
 							class:review-correct={result.points_awarded > 0}
-							aria-label={result.points_awarded > 0 ? 'Correct' : 'Keep learning'}
+							aria-label={result.timed_out
+								? 'Time ran out'
+								: result.points_awarded > 0
+									? 'Correct'
+									: 'Keep learning'}
 						>
 							{result.points_awarded > 0 ? '✓' : '·'}
 						</span>
 						<div>
 							<p class="review-question">{index + 1}. {result.prompt}</p>
 							<p class="review-feedback">
-								{result.points_awarded > 0
-									? `You got it — ${result.points_awarded} points`
-									: `The correct choice earned ${result.points_possible} points`}
+								{result.timed_out
+									? `Time ran out; no answer was recorded. The correct choice earned ${result.points_possible} points.`
+									: result.points_awarded > 0
+										? `You got it — ${result.points_awarded} points`
+										: `The correct choice earned ${result.points_possible} points`}
 							</p>
 						</div>
 					</article>
@@ -152,10 +275,18 @@
 			<div class="quest-badge" aria-hidden="true">✦</div>
 			<p class="eyebrow">A quest is calling</p>
 			<h1 id="welcome-heading" class="page-heading">{activity.title}</h1>
+			{#if activity.cover_image_url}
+				<img class="quest-cover" src={activity.cover_image_url} alt="" />
+			{/if}
 			<p class="page-intro">
 				{activity.questions.length}
-				{activity.questions.length === 1 ? 'question' : 'questions'}. Your own pace. One curious
-				mind.
+				{activity.questions.length === 1 ? 'question' : 'questions'}.
+				{activity.questions.some((question) => question.time_limit_seconds > 0)
+					? 'Each question has its own time limit, set by your educator.'
+					: 'Take the time you need; this quest has no timers.'}
+			</p>
+			<p class="sound-intro">
+				Soft ambient sounds start with your quest. You can turn them off anytime.
 			</p>
 
 			<form class="welcome-form" onsubmit={beginGame}>
@@ -169,9 +300,16 @@
 					placeholder="Your name"
 					bind:value={learnerName}
 					required
+					disabled={starting || Boolean(sessionStartKey && error)}
 				/>
-				<button class="button button-primary" type="submit">
-					Let’s play <span aria-hidden="true">↗</span>
+				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
+				<button class="button button-primary" type="submit" disabled={starting}>
+					{starting
+						? 'Preparing your quest…'
+						: sessionStartKey
+							? 'Retry starting quest'
+							: 'Start quest with soft sounds'}
+					{#if !starting}<span aria-hidden="true">↗</span>{/if}
 				</button>
 			</form>
 		</section>
@@ -179,7 +317,17 @@
 		<section class="play-card question-card" aria-labelledby="question-heading">
 			<div class="game-topline">
 				<a href={resolve('/join')} class="exit-link">← Leave game</a>
-				<span class="game-code">{activity.share_code}</span>
+				<div class="game-actions">
+					<span class="game-code">{activity.share_code}</span>
+					<button
+						class="sound-toggle"
+						type="button"
+						aria-pressed={soundEnabled}
+						onclick={toggleSound}
+					>
+						Sound {soundEnabled ? 'on' : 'off'}
+					</button>
+				</div>
 			</div>
 
 			<div
@@ -202,18 +350,41 @@
 				<span>{current.points} POINTS</span>
 			</div>
 
+			{#if current.time_limit_seconds > 0}
+				<div
+					class="countdown"
+					role="timer"
+					aria-label="{secondsRemaining} seconds remaining"
+					class:countdown-low={secondsRemaining <= 5}
+				>
+					<strong>{secondsRemaining}</strong>
+					<span>seconds remaining</span>
+				</div>
+				<div class="countdown-track" aria-hidden="true">
+					<span
+						class:countdown-track-low={secondsRemaining <= 5}
+						style="width: {Math.min(100, (secondsRemaining / current.time_limit_seconds) * 100)}%"
+					></span>
+				</div>
+			{:else}
+				<p class="untimed-label">No time limit</p>
+			{/if}
+
 			<h1 id="question-heading" class="question-prompt">{current.prompt}</h1>
 
-			<fieldset class="answer-options">
+			<fieldset
+				class="answer-options"
+				disabled={submitting || questionExpired || pendingOptionId !== undefined}
+			>
 				<legend>Choose the answer that feels right.</legend>
 				{#each current.options as option, optionIndex (option.id)}
-					<label class="answer-option" class:answer-selected={answers[current.id] === option.id}>
+					<label class="answer-option" class:answer-selected={selectedOptionId === option.id}>
 						<input
 							type="radio"
 							name="answer-{current.id}"
 							value={option.id}
-							checked={answers[current.id] === option.id}
-							onchange={() => (answers[current.id] = option.id)}
+							checked={selectedOptionId === option.id}
+							onchange={() => (selectedOptionId = option.id)}
 						/>
 						<span class="answer-letter" aria-hidden="true"
 							>{String.fromCharCode(65 + optionIndex)}</span
@@ -224,45 +395,36 @@
 				{/each}
 			</fieldset>
 
+			{#if feedbackMessage}<p class="feedback-message" role="status">{feedbackMessage}</p>{/if}
+			{#if audioUnavailable}
+				<p class="audio-note" role="status">
+					Optional sounds are unavailable; your quest will continue normally.
+				</p>
+			{/if}
 			{#if error}<p class="error-message" role="alert">{error}</p>{/if}
 
 			<div class="question-navigation">
 				<button
-					class="button button-outline"
+					class="button button-primary"
 					type="button"
-					disabled={currentQuestion === 0 || submitting || Boolean(submissionKey)}
-					onclick={() => (currentQuestion -= 1)}
+					disabled={submitting ||
+						(pendingOptionId === undefined && (!selectedOptionId || questionExpired))}
+					onclick={() => submitAnswer(selectedOptionId || null)}
 				>
-					← Previous
+					{submitting
+						? 'Saving your answer…'
+						: pendingOptionId !== undefined
+							? 'Retry answer'
+							: currentQuestion === activity.questions.length - 1
+								? 'Finish quest'
+								: 'Submit answer'}
+					{#if !submitting}<span aria-hidden="true"
+							>{currentQuestion === activity.questions.length - 1 ? '✦' : '→'}</span
+						>{/if}
 				</button>
-				{#if currentQuestion < activity.questions.length - 1}
-					<button
-						class="button button-primary"
-						type="button"
-						disabled={!answers[current.id] || submitting || Boolean(submissionKey)}
-						onclick={() => (currentQuestion += 1)}
-					>
-						Next question <span aria-hidden="true">→</span>
-					</button>
-				{:else}
-					<button
-						class="button button-primary"
-						type="button"
-						disabled={!allQuestionsAnswered || submitting}
-						onclick={finishGame}
-					>
-						{submitting ? 'Checking your answers…' : 'See my score'}
-						{#if !submitting}<span aria-hidden="true">✦</span>{/if}
-					</button>
-				{/if}
 			</div>
-			{#if submissionKey && error}
-				<p class="retry-note">
-					Your answers are saved on this device. Retry to safely check the same submission.
-				</p>
-				<button class="retry-button" type="button" disabled={submitting} onclick={finishGame}>
-					{submitting ? 'Retrying…' : 'Retry submission'}
-				</button>
+			{#if pendingOptionId !== undefined && error}
+				<p class="retry-note">Your response can be safely retried without advancing twice.</p>
 			{/if}
 		</section>
 	{/if}
@@ -364,6 +526,21 @@
 		max-width: 31rem;
 	}
 
+	.sound-intro {
+		margin: 0.55rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.78rem;
+	}
+
+	.quest-cover {
+		display: block;
+		width: min(100%, 34rem);
+		max-height: 20rem;
+		margin: 0.8rem 0 1rem;
+		border-radius: 1rem;
+		object-fit: cover;
+	}
+
 	.welcome-form {
 		display: grid;
 		width: min(100%, 24rem);
@@ -391,6 +568,28 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-bottom: 1.1rem;
+	}
+
+	.game-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+	}
+
+	.sound-toggle {
+		padding: 0.4rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: white;
+		color: var(--ink-soft);
+		font: inherit;
+		font-size: 0.7rem;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.sound-toggle:hover {
+		border-color: var(--gold-deep);
 	}
 
 	.exit-link {
@@ -439,6 +638,56 @@
 		font-size: 0.66rem;
 		font-weight: 800;
 		letter-spacing: 0.1em;
+	}
+
+	.countdown {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		margin-top: 1.3rem;
+		color: var(--navy);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.countdown strong {
+		font-family: Manrope, sans-serif;
+		font-size: 1.45rem;
+		font-weight: 800;
+	}
+
+	.countdown span {
+		color: var(--ink-muted);
+		font-size: 0.76rem;
+	}
+
+	.countdown-low strong {
+		color: #a45e35;
+	}
+
+	.countdown-track {
+		height: 0.25rem;
+		overflow: hidden;
+		margin-top: 0.35rem;
+		border-radius: 1rem;
+		background: #f0ede7;
+	}
+
+	.countdown-track span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: #829b86;
+		transition: width 180ms linear;
+	}
+
+	.countdown-track span.countdown-track-low {
+		background: #c28c60;
+	}
+
+	.untimed-label {
+		margin: 1.25rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.75rem;
 	}
 
 	.question-prompt {
@@ -540,9 +789,22 @@
 
 	.question-navigation {
 		display: flex;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 0.8rem;
 		margin-top: 1.5rem;
+	}
+
+	.feedback-message,
+	.audio-note {
+		margin: 0.9rem 0 0;
+		color: var(--ink-soft);
+		font-size: 0.82rem;
+		line-height: 1.5;
+	}
+
+	.audio-note {
+		color: var(--ink-muted);
+		font-size: 0.74rem;
 	}
 
 	.result-heading {
@@ -644,18 +906,6 @@
 		text-align: center;
 	}
 
-	.retry-button {
-		display: block;
-		margin: 0.5rem auto 0;
-		padding: 0.5rem;
-		border: 0;
-		background: transparent;
-		color: var(--navy);
-		font-size: 0.8rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
 	@keyframes arrive {
 		from {
 			transform: translateY(8px);
@@ -683,9 +933,22 @@
 		}
 
 		.question-navigation .button {
+			width: 100%;
 			min-width: 0;
 			padding-inline: 0.75rem;
 			font-size: 0.79rem;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.play-card,
+		.loader {
+			animation: none;
+		}
+
+		.progress-track span,
+		.countdown-track span {
+			transition: none;
 		}
 	}
 </style>

@@ -1,22 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchActivity, submitAttempt } from './api';
+import { answerPlayQuestion, fetchActivity, startPlaySession } from './api';
+
+function jsonResponse(body: unknown, status = 200) {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { 'Content-Type': 'application/json' }
+	});
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('learning journey API client', () => {
 	it('normalizes and encodes a learner game code in requests', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					data: {
-						id: 'version-id',
-						title: 'A quest',
-						share_code: 'ABCD23456789',
-						questions: []
-					}
-				}),
-				{ status: 200, headers: { 'Content-Type': 'application/json' } }
-			)
+			jsonResponse({
+				data: {
+					id: 'version-id',
+					title: 'A quest',
+					share_code: 'ABCD23456789',
+					cover_image_url: null,
+					questions: []
+				}
+			})
 		);
 		vi.stubGlobal('fetch', fetchMock);
 
@@ -25,43 +30,96 @@ describe('learning journey API client', () => {
 		expect(fetchMock).toHaveBeenCalledWith(
 			'/api/v1/play/ABCD23456789',
 			expect.objectContaining({
-				headers: { Accept: 'application/json' }
+				credentials: 'same-origin',
+				headers: expect.any(Headers)
 			})
 		);
+		expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toHaveProperty('get');
 	});
 
-	it('sends answers and an idempotency key for retry-safe submissions', async () => {
-		const fetchMock = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ data: { id: 'attempt-id' } }), {
-				status: 201,
-				headers: { 'Content-Type': 'application/json' }
-			})
-		);
+	it('starts a play session with the learner name and an idempotency key', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ data: { token: 'csrf-token' } }))
+			.mockResolvedValueOnce(
+				jsonResponse(
+					{
+						data: {
+							id: 'session-id',
+							question_index: 0,
+							time_limit_seconds: 30,
+							time_remaining_seconds: 30,
+							question_started_at: '2026-10-16T12:00:00Z',
+							server_time: '2026-10-16T12:00:00Z'
+						}
+					},
+					201
+				)
+			);
 		vi.stubGlobal('fetch', fetchMock);
 
-		await submitAttempt({
+		await startPlaySession({
 			shareCode: 'ABCD23456789',
 			learnerName: 'Jordan',
-			responses: [{ question_id: 'question-id', option_id: 'option-id' }],
 			idempotencyKey: '00000000-0000-4000-8000-000000000001'
 		});
 
-		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/v1/play/ABCD23456789/attempts',
-			expect.objectContaining({
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-					'Idempotency-Key': '00000000-0000-4000-8000-000000000001'
-				},
-				body: JSON.stringify({
-					attempt: {
-						learner_name: 'Jordan',
-						responses: [{ question_id: 'question-id', option_id: 'option-id' }]
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			1,
+			'/api/v1/auth/csrf',
+			expect.objectContaining({ credentials: 'same-origin' })
+		);
+		const [path, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+		expect(path).toBe('/api/v1/play/ABCD23456789/sessions');
+		expect(init.method).toBe('POST');
+		expect(init.credentials).toBe('same-origin');
+		expect(init.body).toBe(
+			JSON.stringify({
+				play_session: { learner_name: 'Jordan' }
+			})
+		);
+		const headers = init.headers as Headers;
+		expect(headers.get('Accept')).toBe('application/json');
+		expect(headers.get('Content-Type')).toBe('application/json');
+		expect(headers.get('Idempotency-Key')).toBe('00000000-0000-4000-8000-000000000001');
+		expect(headers.get('X-CSRF-Token')).toBe('csrf-token');
+	});
+
+	it('posts the current answer with a retry key and supports unanswered timeout responses', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ data: { token: 'csrf-token' } }))
+			.mockResolvedValueOnce(
+				jsonResponse({
+					data: {
+						complete: false,
+						is_correct: false,
+						timed_out: true,
+						question_index: 1,
+						time_limit_seconds: 0,
+						question_started_at: '2026-10-16T12:00:00Z',
+						server_time: '2026-10-16T12:00:00Z'
 					}
 				})
-			})
+			);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await answerPlayQuestion({
+			shareCode: 'ABCD23456789',
+			sessionId: 'session-id',
+			questionId: 'question-id',
+			optionId: null,
+			idempotencyKey: '00000000-0000-4000-8000-000000000002'
+		});
+
+		const [path, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+		expect(path).toBe('/api/v1/play/ABCD23456789/sessions/session-id/answers');
+		expect(init.method).toBe('POST');
+		expect(init.body).toBe(
+			JSON.stringify({ answer: { question_id: 'question-id', option_id: null } })
+		);
+		expect((init.headers as Headers).get('Idempotency-Key')).toBe(
+			'00000000-0000-4000-8000-000000000002'
 		);
 	});
 

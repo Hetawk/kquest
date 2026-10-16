@@ -4,6 +4,11 @@ class Question < ApplicationRecord
   validates :question_type, inclusion: { in: %w[single_choice] }
   validates :position, numericality: { only_integer: true, greater_than: 0 }
   validates :points, numericality: { only_integer: true, in: 1..1000 }
+  validates :time_limit_seconds, numericality: {
+    only_integer: true,
+    greater_than_or_equal_to: 0,
+    less_than_or_equal_to: Questions::Types::SingleChoice::MAX_TIME_LIMIT_SECONDS
+  }
   validate :definition_is_valid
   validate :published_activity_is_immutable, if: -> { activity&.persisted? }
 
@@ -14,7 +19,8 @@ class Question < ApplicationRecord
       prompt: prompt,
       options: options,
       correct_option_id: correct_option_id,
-      points: points
+      points: points,
+      time_limit_seconds: time_limit_seconds
     )
 
     definition_errors.each do |attribute, message|

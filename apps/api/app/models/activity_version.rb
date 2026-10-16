@@ -3,6 +3,7 @@ class ActivityVersion < ApplicationRecord
 
   belongs_to :activity
   has_many :attempts, dependent: :restrict_with_error
+  has_many :play_sessions, dependent: :delete_all
 
   before_validation :assign_share_code, on: :create
 

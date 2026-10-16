@@ -1,6 +1,8 @@
 class Activity < ApplicationRecord
   STATUSES = %w[draft published].freeze
 
+  belongs_to :user, optional: true
+  belongs_to :uploaded_asset, optional: true
   has_many :questions, -> { order(:position) }, dependent: :destroy
   has_many :activity_versions, dependent: :restrict_with_error
 

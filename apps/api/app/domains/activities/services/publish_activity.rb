@@ -21,13 +21,15 @@ module Activities
               "prompt",
               "options",
               "correct_option_id",
-              "points"
+              "points",
+              "time_limit_seconds"
             )
           end
 
           version = activity.activity_versions.create!(
             version_number: activity.activity_versions.maximum(:version_number).to_i + 1,
             question_snapshot: questions,
+            cover_image_url: activity.uploaded_asset&.public_url,
             published_at: Time.current
           )
           activity.update!(status: "published")
