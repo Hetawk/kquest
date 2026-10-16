@@ -94,7 +94,7 @@ function questionFromRow(row: ImportRow, rowNumber: number): QuestionDraft {
 		);
 	}
 
-	const points = optionalInteger(row.points, 100, 1, 1000, rowNumber, 'points');
+	const points = optionalInteger(row.points, 1, 1, 1000, rowNumber, 'points');
 	const timeLimit = optionalInteger(
 		row.time_limit_seconds,
 		30,

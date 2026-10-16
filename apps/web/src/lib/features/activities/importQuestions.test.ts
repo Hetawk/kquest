@@ -49,7 +49,7 @@ describe('question file import', () => {
 
 		const [question] = await importQuestionFile(file);
 
-		expect(question?.points).toBe(100);
+		expect(question?.points).toBe(1);
 		expect(question?.time_limit_seconds).toBe(30);
 	});
 

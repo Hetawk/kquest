@@ -6,7 +6,7 @@ module Activities
 
       QUESTION_ID_REGEX = /\A[0-9a-f-]{36}\z/i
 
-      def self.call(activity:, questions:, expected_version:, shuffle_questions:, speed_scoring:)
+      def self.call(activity:, title:, questions:, expected_version:, shuffle_questions:, speed_scoring:)
         Activity.transaction do
           activity.lock!
           latest_version = activity.activity_versions.order(:version_number).last
@@ -19,6 +19,11 @@ module Activities
             raise ActiveRecord::RecordInvalid, activity
           end
           raise StaleRevision unless expected_version == latest_version.version_number
+          title = latest_version.title if title.nil?
+          unless title.is_a?(String) && title.strip.present? && title.strip.length <= 120
+            activity.errors.add(:title, "must be between 1 and 120 characters.")
+            raise ActiveRecord::RecordInvalid, activity
+          end
           unless [ true, false ].include?(shuffle_questions) && [ true, false ].include?(speed_scoring)
             activity.errors.add(:settings, "must include boolean shuffle and speed-scoring values.")
             raise ActiveRecord::RecordInvalid, activity
@@ -36,6 +41,7 @@ module Activities
 
           version = activity.activity_versions.create!(
             version_number: latest_version.version_number + 1,
+            title: title.strip,
             question_snapshot: snapshot,
             shuffle_questions:,
             speed_scoring:,

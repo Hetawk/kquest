@@ -29,7 +29,7 @@
 			],
 			correct_option_id: firstOption,
 			correct_option_ids: [firstOption],
-			points: 100,
+			points: 1,
 			time_limit_seconds: 30
 		};
 	};

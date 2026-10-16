@@ -182,6 +182,7 @@ export function publishActivity(activityId: string) {
 export function reviseActivity(
 	activityId: string,
 	revision: {
+		title: string;
 		expected_version: number;
 		shuffle_questions: boolean;
 		speed_scoring: boolean;

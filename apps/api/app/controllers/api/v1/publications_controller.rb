@@ -14,7 +14,7 @@ module Api
         render(
           json: {
             data: {
-              title: activity.title,
+              title: version.title,
               activity_id: activity.id,
               version: version.version_number,
               share_code: version.share_code,

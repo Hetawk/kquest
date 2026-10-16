@@ -6,7 +6,7 @@ module Activities
 
         {
           id: activity_version.id,
-          title: activity_version.activity.title,
+          title: activity_version.title,
           cover_image_url: activity_version.cover_image_url,
           share_code: activity_version.share_code,
           questions: snapshot.map do |question|

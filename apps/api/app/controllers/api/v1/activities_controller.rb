@@ -20,7 +20,7 @@ module Api
           latest_version = activity.activity_versions.max_by(&:version_number)
           {
             id: activity.id,
-            title: activity.title,
+            title: latest_version&.title || activity.title,
             description: activity.description,
             status: activity.status,
             question_count: latest_version&.question_snapshot&.length || activity.questions.size,
@@ -60,7 +60,7 @@ module Api
         render json: {
           data: {
             id: activity.id,
-            title: activity.title,
+            title: latest_version&.title || activity.title,
             description: activity.description,
             status: activity.status,
             question_count: latest_version&.question_snapshot&.length || activity.questions.size,
@@ -83,6 +83,7 @@ module Api
         return render_not_found unless activity
 
         attributes = params.require(:revision).permit(
+          :title,
           :expected_version,
           :shuffle_questions,
           :speed_scoring,
@@ -98,6 +99,7 @@ module Api
         )
         version = Activities::Services::ReviseActivity.call(
           activity:,
+          title: attributes[:title],
           questions: attributes[:questions],
           expected_version: attributes[:expected_version],
           shuffle_questions: attributes[:shuffle_questions],
@@ -107,7 +109,7 @@ module Api
           json: {
             data: {
               activity_id: activity.id,
-              title: activity.title,
+              title: version.title,
               version: version.version_number,
               share_code: version.share_code,
               play_path: "/play/#{version.share_code}"
@@ -177,7 +179,7 @@ module Api
             options: definition[:options]&.map(&:to_h),
             correct_option_id: definition[:correct_option_id] || correct_option_ids.first,
             correct_option_ids:,
-            points: definition[:points],
+            points: definition[:points].nil? ? 1 : definition[:points],
             time_limit_seconds: definition[:time_limit_seconds] ||
               Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS
           )

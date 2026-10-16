@@ -34,6 +34,7 @@ module Activities
 
           version = activity.activity_versions.create!(
             version_number: activity.activity_versions.maximum(:version_number).to_i + 1,
+            title: activity.title,
             question_snapshot: questions,
             shuffle_questions: activity.shuffle_questions?,
             speed_scoring: activity.speed_scoring?,

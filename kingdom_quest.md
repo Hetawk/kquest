@@ -809,8 +809,9 @@ must preserve question identity and be keyboard and screen-reader accessible.
 
 Published versions are immutable. A creator may edit a published quest by
 reviewing its latest version and saving a new immutable version under the same
-quest. The new version receives a new share code; existing attempts, rooms,
-and previously shared codes remain bound to their original snapshots.
+quest. The title is versioned with its questions, so title edits apply to the
+new version while existing attempts, rooms, and previously shared codes retain
+the title and content they were created with.
 "Duplicate" creates a separate editable activity. Before starting a session,
 the host can review, reorder, add, remove, and edit questions, answer choices,
 correct answers, points, and timing. The host can set one time limit for all
@@ -896,7 +897,7 @@ Each type should declare its own definition schema, response schema, evaluation 
 
 - New questions default to 30 seconds. Educators may set an individual limit from 5 to 300 seconds or turn the timer off (`0`) for that question.
 - The published activity version freezes each question's time limit, so later changes cannot alter an active or already-published quest.
-- In session setup, hosts can review and reorder the full question list, edit question content and answer keys, set a per-question limit, or apply one limit to every question. Saving or starting with unsaved edits creates a new immutable version before play begins; the new version uses a new share code while older codes continue to resolve to their original versions.
+- In session setup, hosts can edit the quest title, review and reorder the full question list, edit question content and answer keys, add or remove answer choices (2–6 per question), set a per-question limit, or apply one limit to every question. New questions start with four answer choices and one point. Saving or starting with unsaved edits creates a new immutable version before play begins; the new version uses a new share code while older codes continue to resolve to their original versions.
 - The API starts a play session and records each response in question order. The server decides whether the deadline has elapsed; a browser countdown is only a display.
 - A timed-out question is recorded as unanswered, earns zero points, and advances to the next question. A late answer cannot override the timeout.
 - The client retries session and answer requests with idempotency keys. A completed answer cannot be changed or submitted twice.
@@ -977,7 +978,7 @@ Production secrets remain in Launchpad's environment store.
 
 - An activity supports 1–100 single-choice questions.
 - Educators may author questions in the editor or import a CSV/XLSX workbook. Imported questions are parsed locally, capped at 5 MB and 100 rows, validated against the same question limits, and added to the editor for review and correction before publishing. Import never publishes content directly.
-- The CSV/XLSX first row uses these case-insensitive columns: `question`, `option_a`, `option_b`, optional contiguous `option_c` through `option_f`, `correct_answer`, optional `points`, and optional `time_limit_seconds`. `correct_answer` is either an option letter or an exact answer label. Points default to 100 and timers default to 30 seconds; `0` means untimed. A downloadable CSV example is included in the web app.
+- The CSV/XLSX first row uses these case-insensitive columns: `question`, `option_a`, `option_b`, optional contiguous `option_c` through `option_f`, `correct_answer`, optional `points`, and optional `time_limit_seconds`. `correct_answer` is either an option letter or an exact answer label. Points default to 1 and timers default to 30 seconds; `0` means untimed. A downloadable CSV example is included in the web app.
 - Hosts may request shuffled question order. The order is randomized once while building the immutable published version, not on each browser refresh or between participants; question IDs, answer choices, and correct-answer mapping stay attached.
 
 The first implementation polls room state over REST and uses database-backed timestamps and records for correctness. Action Cable or another authenticated push transport can replace polling without changing the room state machine or scoring authority.

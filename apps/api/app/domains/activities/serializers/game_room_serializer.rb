@@ -17,7 +17,7 @@ module Activities
 
         {
           room_code: room.room_code,
-          title: room.activity_version.activity.title,
+          title: room.activity_version.title,
           status: room.status,
           question_index: room.current_question_index,
           question_count: snapshot.length,

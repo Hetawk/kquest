@@ -20,8 +20,10 @@
 
 	let { data }: PageProps = $props();
 	let activity = $state<CreatorActivityDetail | null>(null);
+	let activityTitle = $state('');
 	let questions = $state<EditableQuestion[]>([]);
 	let originalQuestions = $state('');
+	let originalTitle = $state('');
 	let mode = $state<'host_paced' | 'self_paced'>('host_paced');
 	let step = $state<'mode' | 'questions' | 'settings'>('mode');
 	let loading = $state(true);
@@ -31,7 +33,9 @@
 	let bulkTimeLimit = $state('30');
 	let error = $state('');
 	let notice = $state('');
-	let hasChanges = $derived(originalQuestions !== JSON.stringify(questions));
+	let hasChanges = $derived(
+		originalTitle !== activityTitle || originalQuestions !== JSON.stringify(questions)
+	);
 
 	onMount(() => {
 		void (async () => {
@@ -44,6 +48,8 @@
 					return;
 				}
 				activity = await getCreatorActivity(data.activityId);
+				activityTitle = activity.title;
+				originalTitle = activityTitle;
 				if (data.editMode) step = 'questions';
 				questions = activity.questions.map((question) => ({
 					...question,
@@ -85,19 +91,17 @@
 	}
 
 	function addQuestion() {
+		const options = Array.from({ length: 4 }, () => ({ id: crypto.randomUUID(), text: '' }));
 		questions = [
 			...questions,
 			{
 				id: crypto.randomUUID(),
 				question_type: 'single_choice',
 				prompt: '',
-				options: [
-					{ id: crypto.randomUUID(), text: '' },
-					{ id: crypto.randomUUID(), text: '' }
-				],
-				correct_option_id: '',
-				correct_option_ids: [],
-				points: 100,
+				options,
+				correct_option_id: options[0].id,
+				correct_option_ids: [options[0].id],
+				points: 1,
 				time_limit_seconds: 30
 			}
 		];
@@ -152,12 +156,16 @@
 		if (questions.length === 0) {
 			throw new Error('Add at least one question before saving this quest.');
 		}
+		if (!activityTitle.trim() || activityTitle.trim().length > 120) {
+			throw new Error('Enter a quest title between 1 and 120 characters.');
+		}
 		const savedAt = new Date().toISOString();
 		const updatedQuestions = questions.map((question, index) => ({
 			...question,
 			position: index + 1
 		}));
 		const publication = await reviseActivity(activity.id, {
+			title: activityTitle.trim(),
 			expected_version: activity.version ?? 1,
 			shuffle_questions: activity.shuffle_questions,
 			speed_scoring: activity.speed_scoring,
@@ -165,6 +173,7 @@
 		});
 		activity = {
 			...activity,
+			title: publication.title,
 			share_code: publication.share_code,
 			version: publication.version,
 			question_count: updatedQuestions.length,
@@ -173,6 +182,8 @@
 			questions: updatedQuestions
 		};
 		questions = updatedQuestions;
+		activityTitle = publication.title;
+		originalTitle = activityTitle;
 		originalQuestions = JSON.stringify(questions);
 		notice = `Version ${publication.version} saved. Your new join code is ${publication.share_code}; previous versions remain available on their original links.`;
 	}
@@ -224,7 +235,7 @@
 <svelte:head>
 	<title
 		>{activity
-			? `${data.editMode ? 'Edit' : 'Start'} ${activity.title} — KINGDOM Quest`
+			? `${data.editMode ? 'Edit' : 'Start'} ${activityTitle || activity.title} — KINGDOM Quest`
 			: data.editMode
 				? 'Edit quest — KINGDOM Quest'
 				: 'Start a session — KINGDOM Quest'}</title
@@ -256,7 +267,7 @@
 		<div class="setup-heading">
 			<div>
 				<p class="eyebrow">{data.editMode ? 'EDIT QUEST' : 'START A SESSION'}</p>
-				<h1>{activity.title}</h1>
+				<h1>{activityTitle || activity.title}</h1>
 				<p>
 					{data.editMode
 						? 'Update questions, answers, and timing for the next version.'
@@ -318,6 +329,10 @@
 						? 'Reorder, add, remove, and edit questions or import them from a spreadsheet. Your changes will create a new quest version.'
 						: 'Reorder questions, adjust answer choices and correct answers, or set timing for the whole quest or individual questions.'}
 				</p>
+				<label class="title-field" for="quest-title">
+					<span>Quest title</span>
+					<input id="quest-title" type="text" maxlength="120" bind:value={activityTitle} required />
+				</label>
 				<div class="import-panel">
 					<div>
 						<strong>Import questions from a file</strong>
@@ -613,6 +628,30 @@
 		font:
 			750 clamp(1.25rem, 3vw, 1.75rem)/1.2 Manrope,
 			sans-serif;
+	}
+	.title-field {
+		display: grid;
+		max-width: 38rem;
+		gap: 0.45rem;
+		margin: 1.3rem 0;
+		color: var(--ink);
+		font-size: 0.82rem;
+		font-weight: 700;
+	}
+	.title-field input {
+		width: 100%;
+		padding: 0.75rem 0.85rem;
+		border: 1px solid var(--line);
+		border-radius: 0.7rem;
+		background: var(--paper);
+		color: var(--ink);
+		font: inherit;
+	}
+	.title-field input:focus {
+		border-color: var(--gold-deep);
+		background: white;
+		box-shadow: 0 0 0 3px rgb(200 160 97 / 17%);
+		outline: none;
 	}
 	.mode-grid {
 		display: grid;

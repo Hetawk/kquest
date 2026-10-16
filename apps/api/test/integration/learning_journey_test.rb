@@ -148,6 +148,17 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 1, Attempt.count
   end
 
+  test "defaults omitted question points to one" do
+    question = question_definition.except(:points)
+    activity_id = create_activity(questions: [ question ])
+    publication = publish_activity(activity_id)
+
+    get "/api/v1/play/#{publication.fetch("share_code")}"
+
+    assert_response :success
+    assert_equal 1, response.parsed_body.dig("data", "questions", 0, "points")
+  end
+
   test "lists only the signed-in creator's quests with publication and play summaries" do
     activity_id = create_activity
     publication = publish_activity(activity_id)
@@ -203,6 +214,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     post "/api/v1/activities/#{activity_id}/revisions",
       params: {
         revision: {
+          title: "The Solar System, Revisited",
           expected_version: 1,
           shuffle_questions: false,
           speed_scoring: false,
@@ -215,6 +227,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :created
     revised_publication = response.parsed_body.fetch("data")
     assert_equal activity_id, revised_publication.fetch("activity_id")
+    assert_equal "The Solar System, Revisited", revised_publication.fetch("title")
     assert_equal 2, revised_publication.fetch("version")
     refute_equal original_code, revised_publication.fetch("share_code")
 
@@ -222,16 +235,19 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal [ "Alpha", "Bravo" ],
       response.parsed_body.dig("data", "questions").map { |question| question.fetch("prompt") }
+    assert_equal "The Solar System Sprint", response.parsed_body.dig("data", "title")
 
     get "/api/v1/play/#{revised_publication.fetch("share_code")}"
     assert_response :success
     revised_questions = response.parsed_body.dig("data", "questions")
+    assert_equal "The Solar System, Revisited", response.parsed_body.dig("data", "title")
     assert_equal [ "Bravo", "Alpha, revised" ], revised_questions.map { |question| question.fetch("prompt") }
     assert_equal [ 30, 45 ], revised_questions.map { |question| question.fetch("time_limit_seconds") }
 
     get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
     assert_response :success
     creator_activity = response.parsed_body.fetch("data")
+    assert_equal "The Solar System, Revisited", creator_activity.fetch("title")
     assert_equal 2, creator_activity.fetch("version")
     assert_equal revised_publication.fetch("share_code"), creator_activity.fetch("share_code")
     assert_equal false, ActivityVersion.find_by!(share_code: revised_publication.fetch("share_code")).shuffle_questions

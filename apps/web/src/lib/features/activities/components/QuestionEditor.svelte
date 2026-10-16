@@ -52,6 +52,29 @@
 		);
 		onUpdate({ ...question, options });
 	}
+
+	function addOption() {
+		if (question.options.length >= 6) return;
+		onUpdate({
+			...question,
+			options: [...question.options, { id: crypto.randomUUID(), text: '' }]
+		});
+	}
+
+	function removeOption(optionId: string) {
+		if (question.options.length <= 2) return;
+		const options = question.options.filter((option: ChoiceOption) => option.id !== optionId);
+		const correctOptionIds = question.correct_option_ids.filter((id: string) => id !== optionId);
+		const remainingCorrectOptionIds =
+			correctOptionIds.length > 0 ? correctOptionIds : [options[0].id];
+		onUpdate({
+			...question,
+			options,
+			correct_option_id:
+				question.correct_option_id === optionId ? options[0].id : question.correct_option_id,
+			correct_option_ids: remainingCorrectOptionIds
+		});
+	}
 </script>
 
 <fieldset class="question-editor">
@@ -158,9 +181,26 @@
 				/>
 				<span class="option-letter" aria-hidden="true">{String.fromCharCode(65 + optionIndex)}</span
 				>
+				<button
+					class="option-remove"
+					type="button"
+					aria-label="Remove answer choice {optionIndex + 1}"
+					disabled={question.options.length <= 2}
+					onclick={() => removeOption(option.id)}
+				>
+					×
+				</button>
 			</div>
 		{/each}
 	</div>
+	<button
+		class="button button-outline add-option"
+		type="button"
+		onclick={addOption}
+		disabled={question.options.length >= 6}
+	>
+		+ Add answer choice
+	</button>
 
 	<div class="question-footer">
 		<p class="field-hint">
@@ -370,6 +410,31 @@
 		min-width: 0;
 		align-items: center;
 		gap: 0.65rem;
+	}
+
+	.option-remove {
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		flex: 0 0 2rem;
+		place-items: center;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: white;
+		color: var(--ink-muted);
+		font-size: 1.2rem;
+		cursor: pointer;
+	}
+
+	.option-remove:disabled {
+		cursor: not-allowed;
+		opacity: 0.35;
+	}
+
+	.add-option {
+		margin-top: 0.75rem;
+		padding: 0.5rem 0.7rem;
+		font-size: 0.78rem;
 	}
 
 	.correct-choice {

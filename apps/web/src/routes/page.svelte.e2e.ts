@@ -242,8 +242,9 @@ test('opens published quest editing without play-mode setup and supports deletin
 	);
 	await page.route('**/api/v1/activities/quest-id/revisions', async (route) => {
 		const payload = route.request().postDataJSON() as {
-			revision: { expected_version: number; questions: Array<{ prompt: string }> };
+			revision: { title: string; expected_version: number; questions: Array<{ prompt: string }> };
 		};
+		expect(payload.revision.title).toBe('Updated quest title');
 		expect(payload.revision.expected_version).toBe(1);
 		expect(payload.revision.questions).toHaveLength(1);
 		expect(payload.revision.questions[0]?.prompt).toBe('Imported question');
@@ -252,7 +253,7 @@ test('opens published quest editing without play-mode setup and supports deletin
 			json: {
 				data: {
 					activity_id: 'quest-id',
-					title: 'A published quest',
+					title: 'Updated quest title',
 					version: 2,
 					share_code: 'NEW123',
 					play_path: '/play/NEW123'
@@ -271,6 +272,11 @@ test('opens published quest editing without play-mode setup and supports deletin
 	).toBeVisible();
 	await page.getByRole('button', { name: 'Delete question 1' }).click();
 	await expect(page.getByText('No questions yet')).toBeVisible();
+	await page.getByLabel('Quest title').fill('Updated quest title');
+	await page.getByRole('button', { name: '+ Add a question' }).click();
+	await expect(page.getByLabel('Points')).toHaveValue('1');
+	await expect(page.getByRole('textbox', { name: 'Answer choice 4' })).toBeVisible();
+	await page.getByRole('button', { name: 'Delete question 1' }).click();
 	await page.locator('#revision-question-import').setInputFiles({
 		name: 'questions.csv',
 		mimeType: 'text/csv',

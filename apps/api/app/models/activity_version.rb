@@ -12,6 +12,7 @@ class ActivityVersion < ApplicationRecord
 
   validates :version_number, numericality: { only_integer: true, greater_than: 0 },
                              uniqueness: { scope: :activity_id }
+  validates :title, presence: true, length: { maximum: 120 }
   validates :share_code, presence: true, uniqueness: true, length: { is: CODE_LENGTH }
   validates :question_snapshot, presence: true
   validates :published_at, presence: true
