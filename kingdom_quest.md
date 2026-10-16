@@ -907,6 +907,22 @@ Rankings sort by total points descending, then cumulative server-recorded answer
 
 Joining supports a six-character uppercase letter-and-number code and a direct `/join/{code}` link, which resolves to either a participant-paced activity or a live room. Codes omit ambiguous characters (`I`, `O`, `0`, and `1`). The six-character migration rotates previously issued codes, so hosts must share updated links/codes after deployment. After resolving the code, a learner chooses a display name and may change it until their active live round is answered (or until a self-paced attempt is complete). Guest play does not require an account; Google sign-in is an optional choice and must not block guest access.
 
+### Production deployment
+
+Launchpad deploys the SvelteKit web application and Rails API as separate
+services on the same domain. The web service owns `/`; Rails owns `/api/`.
+Production Rails migrations run with `db:prepare` before the API starts.
+Configure `DATABASE_URL` in Launchpad; optional `CACHE_DATABASE_URL`,
+`QUEUE_DATABASE_URL`, and `CABLE_DATABASE_URL` values can point Rails' auxiliary
+database roles at dedicated databases. Without them, those roles use
+`DATABASE_URL`.
+
+Set `WEB_APP_URL` to the HTTPS application origin and
+`GOOGLE_REDIRECT_URI` to
+`https://<application-domain>/api/v1/auth/google_oauth2/callback`. The
+corresponding callback URL must also be authorized in the Google OAuth client.
+Production secrets remain in Launchpad's environment store.
+
 ### 8.7 Question authoring, import, and shuffle
 
 - An activity supports 1–100 single-choice questions.
