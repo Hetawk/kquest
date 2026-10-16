@@ -23,6 +23,9 @@ export type PlayQuestion = {
 	speed_bonus_points: number;
 	time_limit_seconds: number;
 	speed_scoring: boolean;
+	correct_option_id?: string;
+	correct_option_ids?: string[];
+	closed?: boolean;
 	options: ChoiceOption[];
 };
 
@@ -83,6 +86,7 @@ export type GameRoom = {
 	room_code: string;
 	title: string;
 	status: 'waiting' | 'active' | 'completed';
+	round_phase: 'question' | 'leaderboard' | 'answer';
 	question_index: number;
 	question_count: number;
 	current_question: PlayQuestion | null;

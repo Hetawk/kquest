@@ -38,6 +38,7 @@
 	let lastAudioQuestionIndex = -1;
 	let lastTickSecond = -1;
 	let lastUrgencySecond = -1;
+	let lastAudioPhase = '';
 
 	onMount(() => {
 		let disposed = false;
@@ -59,7 +60,15 @@
 				const updated = await fetchGameRoom(roomCode, sessionId || undefined);
 				if (disposed) return;
 				const previousIndex = room?.question_index;
+				const previousPhase = room?.round_phase;
 				room = updated;
+				if (
+					previousPhase === 'leaderboard' &&
+					updated.round_phase === 'answer' &&
+					!updated.participant?.answered
+				) {
+					liveAudio?.playAnswerCue(true);
+				}
 				if (updated.participant) {
 					name = updated.participant.learner_name;
 					if (previousIndex !== updated.question_index) {
@@ -120,6 +129,8 @@
 			if (
 				!room?.current_question?.time_limit_seconds ||
 				room.status !== 'active' ||
+				room.round_phase !== 'question' ||
+				room.current_question.closed ||
 				answeredLocally
 			)
 				return;
@@ -151,11 +162,34 @@
 		}
 
 		liveAudio?.start();
+		if (currentRoom.round_phase !== 'question') {
+			lastAudioPhase = currentRoom.round_phase;
+			lastUrgencySecond = -1;
+			lastTickSecond = -1;
+			liveAudio?.setTimerUrgency(0);
+			return;
+		}
+		if (
+			currentRoom.current_question.closed ||
+			answeredLocally ||
+			currentRoom.participant?.answered
+		) {
+			lastAudioPhase = 'question';
+			lastUrgencySecond = -1;
+			lastTickSecond = -1;
+			liveAudio?.setTimerUrgency(0);
+			return;
+		}
 		if (lastAudioQuestionIndex !== currentRoom.question_index) {
 			lastAudioQuestionIndex = currentRoom.question_index;
 			lastTickSecond = -1;
 			lastUrgencySecond = -1;
 		}
+		if (lastAudioPhase !== 'question') {
+			lastTickSecond = -1;
+			lastUrgencySecond = -1;
+		}
+		lastAudioPhase = 'question';
 		const seconds = Math.ceil(remaining);
 		if (seconds !== lastUrgencySecond) {
 			lastUrgencySecond = seconds;
@@ -228,6 +262,7 @@
 				idempotencyKey: answerKey
 			});
 			answeredLocally = true;
+			liveAudio?.playAnswerCue(result.is_correct);
 			feedback = result.timed_out
 				? 'Time ran out. Your group will move on together.'
 				: result.is_correct
@@ -258,6 +293,14 @@
 	const questionExpired = $derived(
 		Boolean(room?.current_question?.time_limit_seconds && remaining <= 0)
 	);
+
+	function isCorrectOption(optionId: string) {
+		const question = room?.current_question;
+		if (!question) return false;
+		return question.question_type === 'multiple_select'
+			? (question.correct_option_ids?.includes(optionId) ?? false)
+			: question.correct_option_id === optionId;
+	}
 </script>
 
 <svelte:head>
@@ -387,6 +430,101 @@
 						</p>
 					{/if}
 				</div>
+			{:else if room.current_question && room.round_phase === 'leaderboard'}
+				<section class="post-round-state" aria-live="polite">
+					<div class="waiting-orbit" aria-hidden="true"><span></span><span></span><b>✦</b></div>
+					<p class="eyebrow">ROUND {room.question_index + 1} COMPLETE</p>
+					<h2>Leaderboard</h2>
+					<p class="round-state-caption">
+						You’re locked in. The host will reveal the correct answer next.
+					</p>
+					<ol class="player-leaderboard">
+						{#each room.standings as entry (entry.rank)}
+							<li class:player-leader={entry.rank === 1}>
+								<span class="player-rank">#{entry.rank}</span>
+								<strong>{entry.learner_name}</strong>
+								<b>{entry.score} pts</b>
+							</li>
+						{/each}
+					</ol>
+					<button
+						class="waiting-sound-button"
+						type="button"
+						aria-pressed={soundEnabled && !soundNeedsGesture}
+						disabled={audioUnavailable}
+						onclick={toggleWaitingSound}
+					>
+						{audioUnavailable
+							? 'Sound unavailable'
+							: soundNeedsGesture
+								? 'Enable sound'
+								: `Sound ${soundEnabled ? 'on' : 'off'}`}
+					</button>
+				</section>
+			{:else if room.current_question && room.round_phase === 'answer'}
+				<section class="answer-reveal-state" aria-live="polite">
+					<div class="reveal-sparkle" aria-hidden="true">✦</div>
+					<p class="eyebrow">ANSWER REVEALED</p>
+					<h2>Here is the correct answer</h2>
+					<p class="revealed-question">{room.current_question.prompt}</p>
+					{#if feedback}<p class="locked-feedback">{feedback}</p>{/if}
+					<div class="revealed-options">
+						{#each room.current_question.options as option, index (option.id)}
+							<div
+								class:correct-option={isCorrectOption(option.id)}
+								class:selected-option={selectedOptionIds.includes(option.id)}
+							>
+								<span>{String.fromCharCode(65 + index)}</span>
+								<strong>{option.text}</strong>
+								{#if isCorrectOption(option.id)}<b>Correct answer</b>{/if}
+							</div>
+						{/each}
+					</div>
+					<p class="round-state-caption">The host will start the next question shortly.</p>
+					<button
+						class="waiting-sound-button"
+						type="button"
+						aria-pressed={soundEnabled && !soundNeedsGesture}
+						disabled={audioUnavailable}
+						onclick={toggleWaitingSound}
+					>
+						{audioUnavailable
+							? 'Sound unavailable'
+							: soundNeedsGesture
+								? 'Enable sound'
+								: `Sound ${soundEnabled ? 'on' : 'off'}`}
+					</button>
+				</section>
+			{:else if room.current_question && (room.current_question.closed || answeredLocally || room.participant?.answered)}
+				<section class="answer-waiting-state" aria-live="polite">
+					<div class="waiting-orbit" aria-hidden="true"><span></span><span></span><b>✦</b></div>
+					<p class="eyebrow">
+						{room.current_question.closed ? 'ROUND CLOSED' : 'ANSWER LOCKED IN'}
+					</p>
+					<h2>
+						{room.current_question.closed ? 'This round is closed' : 'Your answer is locked in'}
+					</h2>
+					{#if feedback}<p class="locked-feedback">{feedback}</p>{/if}
+					<p class="round-state-caption">
+						{room.current_question.closed
+							? 'The group is reviewing the leaderboard and answer.'
+							: 'Keep an eye on the host screen while everyone finishes this round.'}
+					</p>
+					<div class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+					<button
+						class="waiting-sound-button"
+						type="button"
+						aria-pressed={soundEnabled && !soundNeedsGesture}
+						disabled={audioUnavailable}
+						onclick={toggleWaitingSound}
+					>
+						{audioUnavailable
+							? 'Sound unavailable'
+							: soundNeedsGesture
+								? 'Enable sound'
+								: `Sound ${soundEnabled ? 'on' : 'off'}`}
+					</button>
+				</section>
 			{:else if room.current_question}
 				<div class="question-meta">
 					<span>QUESTION {room.question_index + 1} OF {room.question_count}</span><span
@@ -631,6 +769,241 @@
 		margin: 0.5rem 0 0;
 		font-size: 0.7rem;
 	}
+	.answer-waiting-state,
+	.post-round-state,
+	.answer-reveal-state {
+		display: grid;
+		justify-items: center;
+		gap: 0.7rem;
+		min-height: 27rem;
+		align-content: center;
+		padding-block: 1.5rem;
+		text-align: center;
+	}
+	.answer-waiting-state h2,
+	.post-round-state h2,
+	.answer-reveal-state h2 {
+		margin: 0;
+		color: var(--navy);
+		font-family: Manrope, sans-serif;
+		font-size: clamp(1.5rem, 6vw, 2.2rem);
+		letter-spacing: -0.045em;
+		line-height: 1.15;
+	}
+	.answer-waiting-state .eyebrow,
+	.post-round-state .eyebrow,
+	.answer-reveal-state .eyebrow {
+		margin: 0;
+	}
+	.waiting-orbit {
+		position: relative;
+		display: grid;
+		width: 6.2rem;
+		height: 6.2rem;
+		place-items: center;
+		margin-bottom: 0.3rem;
+		border: 1px solid #e5d4ad;
+		border-radius: 50%;
+		background: radial-gradient(circle, #fffdf8 0 25%, #fff5dd 67%, #f1e5cc);
+		color: var(--gold-deep);
+		font-size: 1.7rem;
+		box-shadow:
+			0 0 0 0.6rem #c8a06112,
+			0 0.7rem 1.8rem #142a4310;
+	}
+	.waiting-orbit span {
+		position: absolute;
+		inset: 0.45rem;
+		border: 1px solid #c79d574d;
+		border-radius: 50%;
+		animation: player-orbit 7s linear infinite;
+	}
+	.waiting-orbit span:nth-child(2) {
+		inset: 0.12rem;
+		border-style: dashed;
+		animation-direction: reverse;
+		animation-duration: 13s;
+	}
+	.waiting-orbit span::after {
+		position: absolute;
+		top: -0.17rem;
+		left: 50%;
+		width: 0.36rem;
+		height: 0.36rem;
+		border-radius: 50%;
+		background: #c79d57;
+		content: '';
+	}
+	.waiting-orbit b {
+		animation: player-sparkle 1.8s ease-in-out infinite alternate;
+	}
+	@keyframes player-orbit {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	@keyframes player-sparkle {
+		to {
+			transform: scale(1.15);
+			opacity: 0.65;
+		}
+	}
+	.round-state-caption,
+	.locked-feedback {
+		max-width: 30rem;
+		margin: 0;
+		color: var(--ink-muted);
+		font-size: 0.82rem;
+		line-height: 1.55;
+	}
+	.locked-feedback {
+		padding: 0.65rem 0.9rem;
+		border: 1px solid #dbece0;
+		border-radius: 0.7rem;
+		background: #f1f8f2;
+		color: #276040;
+		font-weight: 750;
+	}
+	.waiting-dots {
+		display: flex;
+		align-items: center;
+		gap: 0.32rem;
+		margin: 0.2rem 0;
+	}
+	.waiting-dots span {
+		width: 0.38rem;
+		height: 0.38rem;
+		border-radius: 50%;
+		background: #c8a061;
+		animation: player-dots 1s ease-in-out infinite alternate;
+	}
+	.waiting-dots span:nth-child(2) {
+		animation-delay: 180ms;
+	}
+	.waiting-dots span:nth-child(3) {
+		animation-delay: 360ms;
+	}
+	@keyframes player-dots {
+		to {
+			transform: translateY(-0.28rem);
+			opacity: 0.45;
+		}
+	}
+	.player-leaderboard {
+		display: grid;
+		width: min(100%, 34rem);
+		gap: 0.4rem;
+		max-height: 17rem;
+		overflow: auto;
+		margin: 0.4rem 0;
+		padding: 0.2rem;
+		list-style: none;
+		text-align: left;
+	}
+	.player-leaderboard li {
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		padding: 0.65rem;
+		border: 1px solid #eeece6;
+		border-radius: 0.7rem;
+		background: white;
+	}
+	.player-leaderboard li.player-leader {
+		border-color: #e5d4ad;
+		background: #fffaf0;
+	}
+	.player-rank {
+		display: grid;
+		width: 1.9rem;
+		height: 1.9rem;
+		flex: 0 0 auto;
+		place-items: center;
+		border-radius: 50%;
+		background: #f1eee7;
+		color: var(--navy);
+		font-size: 0.66rem;
+		font-weight: 850;
+	}
+	.player-leader .player-rank {
+		background: #f4e3b6;
+	}
+	.player-leaderboard li strong {
+		overflow: hidden;
+		color: var(--ink);
+		font-size: 0.78rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.player-leaderboard li b {
+		margin-left: auto;
+		color: var(--navy);
+		font-size: 0.74rem;
+		white-space: nowrap;
+	}
+	.reveal-sparkle {
+		display: grid;
+		width: 3.1rem;
+		height: 3.1rem;
+		place-items: center;
+		border-radius: 1rem;
+		background: #edf7ef;
+		color: #25744d;
+		font-size: 1.7rem;
+		animation: player-sparkle 1.4s ease-in-out infinite alternate;
+	}
+	.revealed-question {
+		max-width: 36rem;
+		margin: 0;
+		color: var(--ink-muted);
+		font-size: 0.9rem;
+		line-height: 1.5;
+	}
+	.revealed-options {
+		display: grid;
+		width: min(100%, 37rem);
+		gap: 0.45rem;
+		margin-block: 0.45rem;
+		text-align: left;
+	}
+	.revealed-options > div {
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		padding: 0.7rem;
+		border: 1px solid var(--line);
+		border-radius: 0.7rem;
+		color: var(--ink);
+		font-size: 0.78rem;
+	}
+	.revealed-options > div.correct-option {
+		border-color: #99c9a9;
+		background: #edf7ef;
+		color: #1f643c;
+	}
+	.revealed-options > div.selected-option:not(.correct-option) {
+		border-color: #d7a59a;
+		background: #fff4f1;
+	}
+	.revealed-options > div > span {
+		display: grid;
+		width: 1.6rem;
+		height: 1.6rem;
+		flex: 0 0 auto;
+		place-items: center;
+		border-radius: 50%;
+		background: #f3efe6;
+		font-size: 0.66rem;
+		font-weight: 850;
+	}
+	.revealed-options > div.correct-option > span {
+		background: #d6ecdc;
+	}
+	.revealed-options > div > b {
+		margin-left: auto;
+		font-size: 0.62rem;
+		white-space: nowrap;
+	}
 	.question-meta {
 		display: flex;
 		align-items: center;
@@ -803,7 +1176,11 @@
 		font-weight: 800;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.clock-low {
+		.clock-low,
+		.waiting-orbit span,
+		.waiting-orbit b,
+		.waiting-dots span,
+		.reveal-sparkle {
 			animation: none;
 		}
 	}

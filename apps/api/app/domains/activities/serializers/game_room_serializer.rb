@@ -4,6 +4,7 @@ module Activities
       def self.call(room, participant_session: nil, include_participant_keys: false)
         snapshot = room.activity_version.question_snapshot
         current_question = room.status == "active" ? snapshot.fetch(room.current_question_index) : nil
+        question_payload = serialize_question(current_question, room) if current_question
         sessions = room.play_sessions.to_a
         standings = standings_for(room, sessions, include_participant_keys:)
         participant = if participant_session&.game_room_id == room.id
@@ -20,17 +21,9 @@ module Activities
           title: room.activity_version.title,
           status: room.status,
           question_index: room.current_question_index,
+          round_phase: room.round_phase,
           question_count: snapshot.length,
-          current_question: current_question && {
-            id: current_question.fetch("id"),
-            prompt: current_question.fetch("prompt"),
-            question_type: current_question.fetch("question_type", "single_choice"),
-            points: current_question.fetch("points"),
-            speed_bonus_points: current_question.fetch("speed_bonus_points", current_question.fetch("points")),
-            speed_scoring: current_question.fetch("speed_scoring", false),
-            time_limit_seconds: Questions::Types::SingleChoice.live_time_limit_seconds(current_question),
-            options: current_question.fetch("options").map { |option| { id: option.fetch("id"), text: option.fetch("text") } }
-          },
+          current_question: question_payload,
           question_started_at: room.question_started_at&.iso8601(6),
           started_at: room.started_at&.iso8601(6),
           ended_at: room.ended_at&.iso8601(6),
@@ -54,6 +47,30 @@ module Activities
           standings_final: room.status == "completed"
         }
       end
+
+      def self.serialize_question(question, room)
+        question_type = question.fetch("question_type", "single_choice")
+        payload = {
+          id: question.fetch("id"),
+          prompt: question.fetch("prompt"),
+          question_type: question_type,
+          points: question.fetch("points"),
+          speed_bonus_points: question.fetch("speed_bonus_points", question.fetch("points")),
+          speed_scoring: question.fetch("speed_scoring", false),
+          time_limit_seconds: Questions::Types::SingleChoice.live_time_limit_seconds(question),
+          closed: room.closed_question_indices.include?(room.current_question_index),
+          options: question.fetch("options").map { |option| { id: option.fetch("id"), text: option.fetch("text") } }
+        }
+        if room.round_phase == "answer"
+          if question_type == "multiple_select"
+            payload[:correct_option_ids] = question.fetch("correct_option_ids")
+          else
+            payload[:correct_option_id] = question.fetch("correct_option_id")
+          end
+        end
+        payload
+      end
+      private_class_method :serialize_question
 
       def self.standings_for(room, sessions, include_participant_keys:)
         attempts = Attempt.where(

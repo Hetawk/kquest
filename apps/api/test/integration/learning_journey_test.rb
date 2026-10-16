@@ -112,6 +112,15 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     response.parsed_body.fetch("data")
   end
 
+  def advance_game_room(room_code:, question_index: nil)
+    post "/api/v1/game_rooms/#{room_code}/advance",
+      params: question_index.nil? ? {} : { question_index: question_index },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    response.parsed_body.fetch("data")
+  end
+
   def answer_game_room(room_code:, session_id:, question_id:, option_id:)
     post "/api/v1/game_rooms/#{room_code}/participants/#{session_id}/answers",
       params: { answer: { question_id: question_id, option_id: option_id } },
@@ -487,11 +496,9 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       assert_equal [ 251, 251 ], answers.map { |answer| answer.fetch("points_awarded") }
       assert_equal [ 250, 250 ], answers.map { |answer| answer.fetch("speed_bonus") }
 
-      post "/api/v1/game_rooms/#{room_code}/advance",
-        headers: { "X-CSRF-Token" => fetch_csrf_token },
-        as: :json
-      assert_response :success
-      room_result = response.parsed_body.fetch("data")
+      advance_game_room(room_code:)
+      advance_game_room(room_code:)
+      room_result = advance_game_room(room_code:)
       assert_equal 5, room_result.fetch("duration_seconds")
 
       attempts = Attempt.where(game_room_id: GameRoom.find_by!(room_code: room_code).id).order(:learner_name)
@@ -563,6 +570,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       as: :json
     assert_response :created
     session_id = response.parsed_body.dig("data", "session_id")
+    late_session_id = join_game_room(room_code:, name: "Late Learner")
 
     get "/api/v1/game_rooms/#{room_code}"
     assert_response :success
@@ -584,6 +592,11 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal "active", response.parsed_body.dig("data", "status")
 
     question = publication_question(publication)
+    get "/api/v1/game_rooms/#{room_code}", params: { session_id: session_id }
+    assert_response :success
+    assert_equal "question", response.parsed_body.dig("data", "round_phase")
+    refute response.parsed_body.dig("data", "current_question").key?("correct_option_ids")
+
     post "/api/v1/game_rooms/#{room_code}/participants/#{session_id}/answers",
       params: {
         answer: {
@@ -599,15 +612,53 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal true, response.parsed_body.dig("data", "participants").any? { |participant| participant.fetch("answered") }
 
-    post "/api/v1/game_rooms/#{room_code}/advance",
-      headers: { "X-CSRF-Token" => fetch_csrf_token },
-      as: :json
+    leaderboard = advance_game_room(room_code:)
+    assert_equal "active", leaderboard.fetch("status")
+    assert_equal "leaderboard", leaderboard.fetch("round_phase")
+    refute leaderboard.fetch("current_question").key?("correct_option_ids")
+    get "/api/v1/game_rooms/#{room_code}", params: { session_id: session_id }
     assert_response :success
-    assert_equal "completed", response.parsed_body.dig("data", "status")
-    assert_equal true, response.parsed_body.dig("data", "standings_final")
-    assert_equal "Jordan Updated", response.parsed_body.dig("data", "podium", 0, "learner_name")
-    attempt = Attempt.find_by!(game_room_id: GameRoom.find_by!(room_code: room_code).id)
-    assert_equal 1, Attempt.where(game_room_id: attempt.game_room_id).count
+    assert_equal "leaderboard", response.parsed_body.dig("data", "round_phase")
+    refute response.parsed_body.dig("data", "current_question").key?("correct_option_ids")
+    post "/api/v1/game_rooms/#{room_code}/participants/#{late_session_id}/answers",
+      params: {
+        answer: {
+          question_id: question.fetch("id"),
+          option_ids: definition.fetch(:correct_option_ids)
+        }
+      },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :unprocessable_entity
+    assert_equal "invalid_answer", response.parsed_body.dig("error", "code")
+
+    answer_reveal = advance_game_room(room_code:)
+    assert_equal "answer", answer_reveal.fetch("round_phase")
+    assert_equal definition.fetch(:correct_option_ids), answer_reveal.dig("current_question", "correct_option_ids")
+    assert_equal true, answer_reveal.dig("current_question", "closed")
+    get "/api/v1/game_rooms/#{room_code}", params: { session_id: session_id }
+    assert_response :success
+    assert_equal definition.fetch(:correct_option_ids),
+      response.parsed_body.dig("data", "current_question", "correct_option_ids")
+    post "/api/v1/game_rooms/#{room_code}/participants/#{late_session_id}/answers",
+      params: {
+        answer: {
+          question_id: question.fetch("id"),
+          option_ids: definition.fetch(:correct_option_ids)
+        }
+      },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :unprocessable_entity
+    assert_equal "invalid_answer", response.parsed_body.dig("error", "code")
+
+    completed_room = advance_game_room(room_code:)
+    assert_equal "completed", completed_room.fetch("status")
+    assert_equal true, completed_room.fetch("standings_final")
+    assert_equal "Jordan Updated", completed_room.dig("podium", 0, "learner_name")
+    attempt = Attempt.where(game_room_id: GameRoom.find_by!(room_code: room_code).id)
+      .order(score: :desc).first!
+    assert_equal 2, Attempt.where(game_room_id: attempt.game_room_id).count
     assert_equal definition.fetch(:correct_option_ids).sort, attempt.responses.first.fetch("option_ids").sort
     assert_operator attempt.score, :>, 100
   end
@@ -684,13 +735,11 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       assert_response :success
       assert_equal 23, response.parsed_body.dig("data", "time_remaining_seconds").round
 
-      post "/api/v1/game_rooms/#{room_code}/advance",
-        headers: { "X-CSRF-Token" => fetch_csrf_token },
-        as: :json
-      assert_response :success
-      assert_equal "completed", response.parsed_body.dig("data", "status")
+      assert_equal "leaderboard", advance_game_room(room_code:).fetch("round_phase")
+      assert_equal "answer", advance_game_room(room_code:).fetch("round_phase")
+      assert_equal "completed", advance_game_room(room_code:).fetch("status")
       game_room_id = GameRoom.find_by!(room_code:).id
-      attempt = Attempt.find_by!(game_room_id:)
+      attempt = Attempt.find_by!(game_room_id:, score: 100)
       assert_equal [ 0, 100 ], Attempt.where(game_room_id:).pluck(:score).sort
       assert_equal 3, attempt.responses.length
       scores_by_question = attempt.responses.to_h do |result|

@@ -36,7 +36,10 @@ module Assessments
             result = session.last_response
             next
           end
-          raise InvalidAnswer unless room.status == "active" && !session.completed?
+          raise InvalidAnswer unless room.status == "active" &&
+            room.round_phase == "question" &&
+            !room.closed_question_indices.include?(room.current_question_index) &&
+            !session.completed?
 
           question = room.activity_version.question_snapshot[room.current_question_index]
           raise InvalidAnswer unless question && question.fetch("id") == question_id

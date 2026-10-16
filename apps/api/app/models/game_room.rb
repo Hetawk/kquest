@@ -1,5 +1,6 @@
 class GameRoom < ApplicationRecord
   STATUSES = %w[waiting active completed].freeze
+  ROUND_PHASES = %w[question leaderboard answer].freeze
 
   belongs_to :activity_version
   belongs_to :host_user, class_name: "User"
@@ -9,6 +10,7 @@ class GameRoom < ApplicationRecord
 
   validates :room_code, presence: true, uniqueness: true, length: { is: ActivityVersion::CODE_LENGTH }
   validates :status, inclusion: { in: STATUSES }
+  validates :round_phase, inclusion: { in: ROUND_PHASES }
   validates :current_question_index, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :room_code_is_not_used_by_an_activity
 

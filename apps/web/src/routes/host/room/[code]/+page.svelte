@@ -26,6 +26,7 @@
 	let remaining = $state(0);
 	let deadlineAt = 0;
 	let lastAudioQuestionIndex = -1;
+	let lastAudioPhase: GameRoom['round_phase'] | null = null;
 	let lastTickSecond = -1;
 	let lastUrgencySecond = -1;
 	let roundStartRanks = $state<Record<string, number>>({});
@@ -102,7 +103,12 @@
 				audioUnavailable = true;
 			});
 		const clock = window.setInterval(() => {
-			if (room?.status !== 'active' || !room.current_question?.time_limit_seconds) return;
+			if (
+				room?.status !== 'active' ||
+				room.round_phase !== 'question' ||
+				!room.current_question?.time_limit_seconds
+			)
+				return;
 			remaining = Math.max(0, (deadlineAt - performance.now()) / 1000);
 		}, 150);
 		return () => {
@@ -131,11 +137,23 @@
 		}
 
 		liveAudio?.start();
+		if (currentRoom.round_phase !== 'question') {
+			lastAudioPhase = currentRoom.round_phase;
+			lastUrgencySecond = -1;
+			lastTickSecond = -1;
+			liveAudio?.setTimerUrgency(0);
+			return;
+		}
 		if (lastAudioQuestionIndex !== currentRoom.question_index) {
 			lastAudioQuestionIndex = currentRoom.question_index;
 			lastTickSecond = -1;
 			lastUrgencySecond = -1;
 		}
+		if (lastAudioPhase !== 'question') {
+			lastTickSecond = -1;
+			lastUrgencySecond = -1;
+		}
+		lastAudioPhase = 'question';
 		const seconds = Math.ceil(remaining);
 		if (seconds !== lastUrgencySecond) {
 			lastUrgencySecond = seconds;
@@ -206,7 +224,13 @@
 	}
 
 	async function selectQuestion(questionIndex: number) {
-		if (busy || !room || room.status !== 'active' || questionIndex === room.question_index) return;
+		if (
+			busy ||
+			!room ||
+			room.status !== 'active' ||
+			(questionIndex === room.question_index && room.round_phase === 'question')
+		)
+			return;
 		busy = true;
 		error = '';
 		try {
@@ -291,6 +315,13 @@
 	function updateRoom(updated: GameRoom, requestStartedAt: number) {
 		const previousRoom = room;
 		if (
+			previousRoom?.status === 'active' &&
+			previousRoom.round_phase !== 'answer' &&
+			updated.round_phase === 'answer'
+		) {
+			liveAudio?.playAnswerCue(true);
+		}
+		if (
 			updated.status === 'active' &&
 			(!previousRoom ||
 				previousRoom.status === 'waiting' ||
@@ -319,6 +350,14 @@
 	function rankMovement(entry: GameRoom['standings'][number]) {
 		const previousRank = roundStartRanks[leaderboardKey(entry)];
 		return previousRank === undefined ? 0 : previousRank - entry.rank;
+	}
+
+	function isCorrectOption(optionId: string) {
+		const question = room?.current_question;
+		if (!question) return false;
+		return question.question_type === 'multiple_select'
+			? (question.correct_option_ids?.includes(optionId) ?? false)
+			: question.correct_option_id === optionId;
 	}
 
 	function toggleLiveSound() {
@@ -484,6 +523,140 @@
 							{busy ? 'Starting…' : 'Start now'} <span aria-hidden="true">→</span>
 						</button>
 					</div>
+				{:else if room.status === 'active' && room.current_question && room.round_phase === 'leaderboard'}
+					<section class="round-review-card" aria-labelledby="round-leaderboard-title">
+						<div class="review-heading">
+							<p class="eyebrow">ROUND {room.question_index + 1} COMPLETE</p>
+							<div class="review-tools">
+								<label class="question-picker">
+									<span>Question</span>
+									<select
+										value={room.question_index}
+										aria-label="Select a live question"
+										disabled={busy}
+										onchange={(event) => void selectQuestion(Number(event.currentTarget.value))}
+									>
+										{#each questionNumbers as questionIndex (questionIndex)}
+											<option value={questionIndex}>{questionIndex + 1}</option>
+										{/each}
+									</select>
+									<span>of {room.question_count}</span>
+								</label>
+								<button
+									class="fullscreen-button"
+									type="button"
+									aria-pressed={soundEnabled && !soundNeedsGesture}
+									disabled={audioUnavailable}
+									onclick={toggleLiveSound}
+								>
+									{audioUnavailable
+										? 'Sound unavailable'
+										: soundNeedsGesture
+											? 'Enable sound'
+											: `Sound ${soundEnabled ? 'on' : 'off'}`}
+								</button>
+							</div>
+						</div>
+						<div class="review-hero">
+							<div class="review-orbit" aria-hidden="true"><span></span><b>✦</b></div>
+							<h2 id="round-leaderboard-title">Leaderboard</h2>
+							<p>
+								{room.answered_count} of {room.participant_count} learners answered. Take a moment to
+								celebrate their scores before revealing the answer.
+							</p>
+						</div>
+						<ol class="review-standings" aria-label="Round leaderboard">
+							{#each room.standings as entry (entry.rank)}
+								{@const movement = rankMovement(entry)}
+								<li class:review-leader={entry.rank === 1}>
+									<span class="review-rank">#{entry.rank}</span>
+									<span class="review-player">
+										<strong>{entry.learner_name}</strong>
+										<small>{entry.score} points</small>
+									</span>
+									<span
+										class="leaderboard-movement"
+										class:moved-up={movement > 0}
+										class:moved-down={movement < 0}
+									>
+										{movement > 0
+											? `↑ ${movement}`
+											: movement < 0
+												? `↓ ${Math.abs(movement)}`
+												: '—'}
+									</span>
+								</li>
+							{/each}
+						</ol>
+						<button
+							class="button button-primary advance-button"
+							type="button"
+							onclick={advance}
+							disabled={busy}
+						>
+							{busy ? 'Loading answer…' : 'Reveal the correct answer'}
+							<span aria-hidden="true">→</span>
+						</button>
+					</section>
+				{:else if room.status === 'active' && room.current_question && room.round_phase === 'answer'}
+					<section class="question-card answer-review-card" aria-labelledby="answer-review-title">
+						<div class="question-topline">
+							<label class="question-picker">
+								<span>Question</span>
+								<select
+									value={room.question_index}
+									aria-label="Select a live question"
+									disabled={busy}
+									onchange={(event) => void selectQuestion(Number(event.currentTarget.value))}
+								>
+									{#each questionNumbers as questionIndex (questionIndex)}
+										<option value={questionIndex}>{questionIndex + 1}</option>
+									{/each}
+								</select>
+								<span>of {room.question_count}</span>
+							</label>
+							<button
+								class="fullscreen-button live-sound-button"
+								type="button"
+								aria-pressed={soundEnabled && !soundNeedsGesture}
+								disabled={audioUnavailable}
+								onclick={toggleLiveSound}
+							>
+								{audioUnavailable
+									? 'Sound unavailable'
+									: soundNeedsGesture
+										? 'Enable sound'
+										: `Sound ${soundEnabled ? 'on' : 'off'}`}
+							</button>
+						</div>
+						<p class="eyebrow answer-review-eyebrow">ANSWER REVEAL</p>
+						<h2 id="answer-review-title">{room.current_question.prompt}</h2>
+						<div class="answer-options answer-reveal-options">
+							{#each room.current_question.options as option, index (option.id)}
+								<div class:correct-answer={isCorrectOption(option.id)}>
+									<span>{String.fromCharCode(65 + index)}</span>
+									<strong>{option.text}</strong>
+									{#if isCorrectOption(option.id)}<b>Correct answer</b>{/if}
+								</div>
+							{/each}
+						</div>
+						<button
+							class="button button-primary advance-button"
+							type="button"
+							onclick={advance}
+							disabled={busy}
+						>
+							{busy
+								? 'Moving on…'
+								: room.question_index + 1 === room.question_count
+									? 'End game and show winners'
+									: 'Next question'}
+							<span aria-hidden="true">→</span>
+						</button>
+						<p class="helper-note">
+							Answer choices are now locked. You can revisit any question from the selector.
+						</p>
+					</section>
 				{:else if room.status === 'active' && room.current_question}
 					<div class="question-card">
 						<div class="question-topline">
@@ -552,16 +725,12 @@
 							onclick={advance}
 							disabled={busy}
 						>
-							{busy
-								? 'Moving on…'
-								: room.question_index + 1 === room.question_count
-									? 'End game and show winners'
-									: 'End round and advance'}
+							{busy ? 'Closing round…' : 'Close round and view leaderboard'}
 							<span aria-hidden="true">→</span>
 						</button>
 						<p class="helper-note">
-							Previous answers stay locked if you revisit a question. Unanswered questions receive
-							zero when the game ends.
+							Answers pause while you review. Reveal the correct answer before moving on; submitted
+							answers can never be changed.
 						</p>
 					</div>
 				{:else}
@@ -1085,6 +1254,157 @@
 	.room-capacity-note span {
 		padding-inline: 0.25rem;
 		color: var(--gold-deep);
+	}
+	.round-review-card {
+		display: grid;
+		gap: 1.1rem;
+		padding: clamp(1rem, 3vw, 1.6rem);
+	}
+	.review-heading,
+	.review-tools {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+	.review-heading > .eyebrow {
+		margin: 0;
+	}
+	.review-tools {
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+	.review-hero {
+		display: grid;
+		justify-items: center;
+		padding: 0.5rem 0 0.2rem;
+		text-align: center;
+	}
+	.review-orbit {
+		position: relative;
+		display: grid;
+		width: 4.2rem;
+		height: 4.2rem;
+		place-items: center;
+		margin-bottom: 0.7rem;
+		border: 1px solid #e5d4ad;
+		border-radius: 50%;
+		background: radial-gradient(circle, #fffaf0 0 30%, #f7edd9 70%, #efe2c7);
+		color: var(--gold-deep);
+		font-size: 1.5rem;
+		box-shadow: 0 0 0 0.55rem #d1a95814;
+	}
+	.review-orbit span {
+		position: absolute;
+		inset: 0.35rem;
+		border: 1px solid #c79d574d;
+		border-radius: 50%;
+		animation: orbit-turn 8s linear infinite;
+	}
+	.review-orbit span::after {
+		position: absolute;
+		top: -0.16rem;
+		left: 50%;
+		width: 0.34rem;
+		height: 0.34rem;
+		border-radius: 50%;
+		background: #c79d57;
+		content: '';
+	}
+	@keyframes orbit-turn {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.review-hero h2 {
+		margin: 0;
+		color: var(--navy);
+		font:
+			800 clamp(1.5rem, 4vw, 2.2rem) Manrope,
+			sans-serif;
+		letter-spacing: -0.04em;
+	}
+	.review-hero p {
+		max-width: 32rem;
+		margin: 0.45rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.78rem;
+		line-height: 1.55;
+	}
+	.review-standings {
+		display: grid;
+		gap: 0.45rem;
+		max-height: min(45vh, 24rem);
+		overflow: auto;
+		margin: 0;
+		padding: 0.15rem;
+		list-style: none;
+	}
+	.review-standings li {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.7rem 0.8rem;
+		border: 1px solid #eeece6;
+		border-radius: 0.75rem;
+		background: #fff;
+	}
+	.review-standings li.review-leader {
+		border-color: #e5d4ad;
+		background: #fffaf0;
+	}
+	.review-rank {
+		display: grid;
+		width: 2.1rem;
+		height: 2.1rem;
+		flex: 0 0 auto;
+		place-items: center;
+		border-radius: 50%;
+		background: #f1eee7;
+		color: var(--navy);
+		font-size: 0.7rem;
+		font-weight: 850;
+	}
+	.review-leader .review-rank {
+		background: #f4e3b6;
+	}
+	.review-player {
+		display: grid;
+		min-width: 0;
+		gap: 0.1rem;
+	}
+	.review-player strong {
+		overflow: hidden;
+		color: var(--ink);
+		font-size: 0.8rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.review-player small {
+		color: var(--ink-muted);
+		font-size: 0.66rem;
+	}
+	.answer-review-card h2 {
+		margin-block: 0.3rem 0.5rem;
+	}
+	.answer-review-eyebrow {
+		margin: 1.2rem 0 0;
+	}
+	.answer-reveal-options div.correct-answer {
+		border-color: #99c9a9;
+		background: #edf7ef;
+		color: #1f643c;
+	}
+	.answer-reveal-options div.correct-answer span {
+		background: #d6ecdc;
+		color: #1f643c;
+	}
+	.answer-reveal-options div.correct-answer b {
+		margin-left: auto;
+		color: #25744d;
+		font-size: 0.64rem;
+		white-space: nowrap;
 	}
 	.question-card,
 	.results-card {
