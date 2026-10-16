@@ -17,17 +17,17 @@ class AuthChallenge < ApplicationRecord
 
   def self.issue!(email:, purpose:, user: nil)
     normalized_email = email.to_s.strip.downcase
-    now = Time.current
-
-    recent = where(email: normalized_email, purpose:, created_at: 1.hour.ago..)
-      .order(created_at: :desc)
-    raise RateLimited if recent.count >= HOURLY_SEND_LIMIT
-    raise ResendTooSoon if recent.where("last_sent_at > ?", RESEND_INTERVAL.ago).exists?
-
     code = format("%06d", SecureRandom.random_number(1_000_000))
     challenge = nil
     transaction do
-      active.where(email: normalized_email, purpose:).update_all(consumed_at: now, updated_at: now)
+      user&.lock!
+      now = Time.current
+      recent = where(email: normalized_email, purpose:, created_at: 1.hour.ago..)
+      raise RateLimited if recent.count >= HOURLY_SEND_LIMIT
+      raise ResendTooSoon if recent.where("last_sent_at > ?", RESEND_INTERVAL.ago).exists?
+
+      where(email: normalized_email, purpose:, consumed_at: nil)
+        .update_all(consumed_at: now, updated_at: now)
       challenge = create!(
         user:,
         email: normalized_email,

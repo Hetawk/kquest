@@ -18,6 +18,9 @@ runs `db:prepare` before starting the API, and routes `/api/` to Rails. Set the
 production `WEB_APP_URL` and Google OAuth callback URL to the configured
 application domain. Provider keys and mail/assets credentials belong in
 Launchpad's encrypted production environment, not in the repository.
+Register the exact callback URL
+`https://<application-domain>/api/v1/auth/google_oauth2/callback` as an
+authorized redirect URI in the Google OAuth client.
 
 Run the API suite with:
 

@@ -98,8 +98,9 @@ module Api
 
         def verify
           email = normalized_email
-          code = params[:code].to_s
-          challenge = AuthChallenge.active.find_by(email:, purpose: "email_verification")
+          code = normalized_code
+          challenge = AuthChallenge.active.where(email:, purpose: "email_verification")
+            .order(created_at: :desc).first
           unless valid_code?(code) && challenge&.consume_if_valid!(code)
             return invalid_code
           end
@@ -152,7 +153,7 @@ module Api
 
         def reset_password
           email = normalized_email
-          code = params[:code].to_s
+          code = normalized_code
           password = params[:password].to_s
           confirmation = params[:password_confirmation].to_s
           unless valid_password?(password) && password == confirmation
@@ -181,6 +182,10 @@ module Api
 
         def normalized_email
           params[:email].to_s.strip.downcase
+        end
+
+        def normalized_code
+          params[:code].to_s.gsub(/[\p{Space}-]/, "")
         end
 
         def valid_email?(email)

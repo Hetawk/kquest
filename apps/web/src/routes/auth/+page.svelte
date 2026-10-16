@@ -59,6 +59,14 @@
 		passwordConfirmation = '';
 	}
 
+	function handleCodeInput(event: Event) {
+		if (!(event.currentTarget instanceof HTMLInputElement)) return;
+
+		const input = event.currentTarget;
+		code = input.value.replace(/[^0-9]/g, '').slice(0, 6);
+		input.value = code;
+	}
+
 	async function handleSubmit(event: SubmitEvent) {
 		event.preventDefault();
 		if (busy) return;
@@ -218,10 +226,9 @@
 							name="code"
 							inputmode="numeric"
 							autocomplete="one-time-code"
-							pattern="[0-9]{6}"
-							minlength="6"
-							maxlength="6"
+							maxlength="32"
 							required
+							oninput={handleCodeInput}
 						/>
 					</label>
 				{/if}

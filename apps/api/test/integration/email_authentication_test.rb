@@ -125,7 +125,7 @@ class EmailAuthenticationTest < ActionDispatch::IntegrationTest
       post "/api/v1/auth/password/reset",
         params: {
           email: user.email,
-          code:,
+          code: code.chars.each_slice(2).map(&:join).join(" "),
           password: "a-new-secure-password",
           password_confirmation: "a-new-secure-password"
         },
@@ -207,6 +207,27 @@ class EmailAuthenticationTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_nil user.reload.email_verified_at
+  end
+
+  test "verification accepts a code pasted with visual spacing" do
+    user = User.create!(
+      email: "spaced@example.test",
+      name: "Spaced",
+      password: "a-secure-password"
+    )
+    _challenge, code = AuthChallenge.issue!(
+      email: user.email,
+      purpose: "email_verification",
+      user:
+    )
+
+    post "/api/v1/auth/email/verify",
+      params: { email: user.email, code: code.chars.join(" ") },
+      headers: csrf_headers,
+      as: :json
+
+    assert_response :success
+    assert user.reload.email_verified_at
   end
 
   test "verification codes stop accepting guesses after five attempts" do

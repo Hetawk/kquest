@@ -84,7 +84,10 @@ ownership is tied to the signed-in user.
 OAuth and provider configuration is loaded only by the Rails server. Set
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and
 `WEB_APP_URL` in the ignored root `.env`, and register the redirect URI with
-Google. The callback must exactly match `GOOGLE_REDIRECT_URI`.
+Google. For `https://kquest.ekddigital.com`, the authorized Google redirect
+URI must exactly be
+`https://kquest.ekddigital.com/api/v1/auth/google_oauth2/callback`; the
+similarly named `/api/auth/callback/google` path is not a Kquest endpoint.
 
 Verification, recovery, and welcome messages use EKDSend. Configure
 `EKDSEND_API_URL`, `EKDSEND_API_KEY`, and `FROM_EMAIL`; production mail jobs use
