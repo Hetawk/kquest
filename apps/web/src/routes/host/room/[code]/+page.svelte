@@ -375,7 +375,7 @@
 	<meta name="robots" content="noindex" />
 </svelte:head>
 
-<main class="host-page" bind:this={hostPage}>
+<main class="host-page" class:fullscreen-lobby={room?.status === 'waiting'} bind:this={hostPage}>
 	{#if loading && !room}
 		<section class="host-shell loading-shell" role="status" aria-label="Opening the live room">
 			<span></span><span></span><span></span>
@@ -1764,6 +1764,182 @@
 		}
 		.qr-placeholder {
 			animation: none;
+		}
+	}
+	.host-page:fullscreen.fullscreen-lobby {
+		box-sizing: border-box;
+		min-height: 100vh;
+		padding: clamp(1.5rem, 3vh, 3rem) clamp(1.5rem, 5vw, 5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .session-header,
+	.host-page:fullscreen.fullscreen-lobby .host-layout,
+	.host-page:fullscreen.fullscreen-lobby .host-alert,
+	.host-page:fullscreen.fullscreen-lobby .host-notice {
+		width: min(100%, 112rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .session-heading {
+		padding-bottom: clamp(1.5rem, 3vh, 2.5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .session-heading h1 {
+		font-size: clamp(2.25rem, 4vw, 4rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .eyebrow {
+		font-size: clamp(0.72rem, 0.9vw, 0.9rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .session-tools {
+		gap: 0.8rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .fullscreen-button,
+	.host-page:fullscreen.fullscreen-lobby .session-status {
+		padding: 0.75rem 1rem;
+		font-size: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .host-layout {
+		grid-template-columns: minmax(0, 1.7fr) minmax(20rem, 0.9fr);
+		align-items: stretch;
+		gap: clamp(1.25rem, 2vw, 2rem);
+		min-height: max(36rem, calc(100vh - 12rem));
+	}
+	.host-page:fullscreen.fullscreen-lobby .host-main {
+		grid-template-rows: minmax(0, 1fr) auto;
+		gap: clamp(1.25rem, 2vh, 2rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .invite-card {
+		grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.48fr);
+		align-items: stretch;
+		gap: clamp(1.25rem, 2vw, 2rem);
+		padding: clamp(1.75rem, 3vw, 3rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .invite-content h2,
+	.host-page:fullscreen.fullscreen-lobby .host-action-card h2 {
+		font-size: clamp(1.65rem, 2.5vw, 2.4rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .invite-content > p:not(.eyebrow),
+	.host-page:fullscreen.fullscreen-lobby .host-action-card p:not(.eyebrow) {
+		max-width: 55rem;
+		font-size: clamp(0.95rem, 1.1vw, 1.15rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .waiting-audio-control {
+		margin-bottom: 1.25rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .join-code-panel,
+	.host-page:fullscreen.fullscreen-lobby .join-link-panel {
+		padding: clamp(1rem, 1.5vw, 1.5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .share-label {
+		font-size: 0.75rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .share-code {
+		font-size: clamp(2.75rem, 5vw, 4.5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .copy-icon-button {
+		width: 3.25rem;
+		height: 3.25rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .join-link-copy a {
+		font-size: clamp(0.9rem, 1.1vw, 1.1rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .join-link-copy small {
+		font-size: 0.8rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .join-link-panel .button,
+	.host-page:fullscreen.fullscreen-lobby .share-button {
+		font-size: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .qr-panel {
+		min-height: 100%;
+		padding: clamp(1rem, 2vw, 2rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .qr-panel img,
+	.host-page:fullscreen.fullscreen-lobby .qr-placeholder {
+		width: min(100%, 17rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .qr-panel strong {
+		font-size: 1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .qr-panel > span {
+		font-size: 0.85rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .host-action-card {
+		padding: clamp(1.5rem, 2.5vw, 2.5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .host-action-card .button {
+		padding: 1rem 1.5rem;
+		font-size: 1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participants-panel {
+		position: static;
+		min-height: 100%;
+		padding: clamp(1.5rem, 2.5vw, 2.5rem);
+	}
+	.host-page:fullscreen.fullscreen-lobby .participants-heading h2 {
+		font-size: 1.6rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participant-count {
+		min-width: 2.75rem;
+		height: 2.75rem;
+		font-size: 1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participants-caption {
+		font-size: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .empty-participants {
+		min-height: 20rem;
+		align-content: center;
+		gap: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .empty-people {
+		width: 4.5rem;
+		height: 4.5rem;
+		font-size: 2.25rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .empty-participants strong {
+		font-size: 1.1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .empty-participants > span:last-child {
+		max-width: 20rem;
+		font-size: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participant-list li {
+		gap: 0.9rem;
+		padding-block: 0.9rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .avatar {
+		width: 2.75rem;
+		height: 2.75rem;
+		font-size: 1.1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participant-list li strong {
+		font-size: 1rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .room-capacity-note {
+		font-size: 0.8rem;
+	}
+	@media (max-width: 900px) {
+		.host-page:fullscreen.fullscreen-lobby .host-layout {
+			grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
+		}
+		.host-page:fullscreen.fullscreen-lobby .invite-card {
+			grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.45fr);
+		}
+	}
+	@media (max-width: 680px) {
+		.host-page:fullscreen.fullscreen-lobby .host-layout {
+			grid-template-columns: 1fr;
+		}
+		.host-page:fullscreen.fullscreen-lobby .participants-panel {
+			grid-row: auto;
+			min-height: 20rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .invite-card {
+			grid-template-columns: 1fr;
+		}
+		.host-page:fullscreen.fullscreen-lobby .qr-panel {
+			min-height: 15rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .qr-panel img,
+		.host-page:fullscreen.fullscreen-lobby .qr-placeholder {
+			width: min(100%, 10rem);
 		}
 	}
 </style>
