@@ -4,10 +4,14 @@
 	import {
 		answerPlayQuestion,
 		fetchActivity,
+		fetchLeaderboard,
+		renamePlaySession,
 		startPlaySession
 	} from '#lib/features/activities/api.js';
+	import Podium from '#lib/features/activities/components/Podium.svelte';
 	import type {
 		AttemptResult,
+		PlayLeaderboard,
 		PlayActivity,
 		PlaySessionProgress
 	} from '#lib/features/activities/types.js';
@@ -16,6 +20,7 @@
 	let { data }: PageProps = $props();
 	let activity = $state<PlayActivity | null>(null);
 	let attempt = $state<AttemptResult | null>(null);
+	let leaderboard = $state<PlayLeaderboard | null>(null);
 	let learnerName = $state('');
 	let currentQuestion = $state(0);
 	let selectedOptionId = $state('');
@@ -29,6 +34,8 @@
 	let soundEnabled = $state(true);
 	let audioUnavailable = $state(false);
 	let feedbackMessage = $state('');
+	let editingName = $state(false);
+	let savingName = $state(false);
 	let pendingOptionId = $state<string | null | undefined>(undefined);
 	let sessionStartKey = $state('');
 	let sessionLearnerName = '';
@@ -58,6 +65,20 @@
 				void submitAnswer(null);
 			}
 		}, 200);
+		const leaderboardTimer = window.setInterval(() => {
+			if (!attempt) return;
+			void fetchLeaderboard(data.shareCode)
+				.then((result) => {
+					if (!disposed) leaderboard = result;
+				})
+				.catch((cause: unknown) => {
+					if (!disposed)
+						error =
+							cause instanceof Error
+								? cause.message
+								: 'The shared standings could not be refreshed.';
+				});
+		}, 5000);
 
 		void import('#lib/features/audio/GameAudio.js')
 			.then(({ GameAudio }) => {
@@ -88,6 +109,7 @@
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
+			window.clearInterval(leaderboardTimer);
 			gameAudio?.dispose();
 			gameAudio = null;
 		};
@@ -155,6 +177,14 @@
 			if (progress.complete) {
 				attempt = progress.attempt;
 				gameAudio?.stopAmbient();
+				void fetchLeaderboard(activity.share_code)
+					.then((result) => (leaderboard = result))
+					.catch((cause: unknown) => {
+						error =
+							cause instanceof Error
+								? cause.message
+								: 'Your score was saved, but the shared standings could not be loaded.';
+					});
 			} else {
 				currentQuestion = progress.question_index;
 				selectedOptionId = '';
@@ -164,6 +194,7 @@
 					requestStartedAt
 				);
 			}
+
 			pendingOptionId = undefined;
 			answerRequestKey = '';
 			error = '';
@@ -171,6 +202,26 @@
 			error = cause instanceof Error ? cause.message : 'Your answers could not be submitted.';
 		} finally {
 			submitting = false;
+		}
+	}
+
+	async function saveName(event: SubmitEvent) {
+		event.preventDefault();
+		if (!activity || !playSessionId || savingName) return;
+		savingName = true;
+		error = '';
+		try {
+			const updated = await renamePlaySession({
+				shareCode: activity.share_code,
+				sessionId: playSessionId,
+				learnerName
+			});
+			learnerName = updated.learner_name;
+			editingName = false;
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Your display name could not be changed.';
+		} finally {
+			savingName = false;
 		}
 	}
 
@@ -238,6 +289,25 @@
 			>
 				<strong>{attempt.score}</strong><span>/ {attempt.max_score} points</span>
 			</div>
+			{#if leaderboard}
+				<Podium
+					entries={leaderboard.podium}
+					finalized={false}
+					participantCount={leaderboard.participant_count}
+				/>
+				{#if leaderboard.standings.length > 0}
+					<div class="shared-standings">
+						<h2>Shared provisional standings</h2>
+						{#each leaderboard.standings as entry (entry.rank)}
+							<div class="standing-row">
+								<span>#{entry.rank}</span><strong>{entry.learner_name}</strong><b
+									>{entry.score} pts</b
+								>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			{/if}
 
 			<div class="answer-review">
 				<h2>Your answers</h2>
@@ -258,10 +328,10 @@
 							<p class="review-question">{index + 1}. {result.prompt}</p>
 							<p class="review-feedback">
 								{result.timed_out
-									? `Time ran out; no answer was recorded. The correct choice earned ${result.points_possible} points.`
+									? `Time ran out; no answer was recorded. A correct choice could earn up to ${result.points_possible} points.`
 									: result.points_awarded > 0
-										? `You got it — ${result.points_awarded} points`
-										: `The correct choice earned ${result.points_possible} points`}
+										? `You got it — ${result.base_points} base${result.speed_bonus ? ` + ${result.speed_bonus} speed bonus` : ''} = ${result.points_awarded} points`
+										: `A correct choice could earn up to ${result.points_possible} points`}
 							</p>
 						</div>
 					</article>
@@ -287,6 +357,9 @@
 			</p>
 			<p class="sound-intro">
 				Soft ambient sounds start with your quest. You can turn them off anytime.
+			</p>
+			<p class="guest-choice">
+				Join as a guest without an account, or <a href={resolve('/')}>sign in with Google</a> if you prefer.
 			</p>
 
 			<form class="welcome-form" onsubmit={beginGame}>
@@ -347,8 +420,33 @@
 						activity.questions.length
 					).padStart(2, '0')}</span
 				>
-				<span>{current.points} POINTS</span>
+				<span
+					>{current.points} BASE + {current.speed_scoring && current.time_limit_seconds > 0
+						? `${current.points} SPEED BONUS`
+						: 'NO SPEED BONUS'}</span
+				>
 			</div>
+			<div class="player-name-line">
+				<span>Playing as <strong>{learnerName}</strong></span>
+				<button class="name-edit" type="button" onclick={() => (editingName = !editingName)}
+					>Change name</button
+				>
+			</div>
+			{#if editingName}
+				<form class="rename-inline" onsubmit={saveName}>
+					<label for="active-learner-name">Display name</label>
+					<input
+						id="active-learner-name"
+						class="text-input"
+						maxlength="80"
+						bind:value={learnerName}
+						required
+					/>
+					<button class="button button-outline" type="submit" disabled={savingName}
+						>{savingName ? 'Saving…' : 'Save name'}</button
+					>
+				</form>
+			{/if}
 
 			{#if current.time_limit_seconds > 0}
 				<div
@@ -530,6 +628,76 @@
 		margin: 0.55rem 0 0;
 		color: var(--ink-muted);
 		font-size: 0.78rem;
+	}
+
+	.guest-choice {
+		margin: 0.45rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.76rem;
+	}
+	.guest-choice a {
+		color: var(--navy);
+		font-weight: 700;
+	}
+	.player-name-line {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.6rem;
+		margin-top: 1rem;
+		padding: 0.6rem 0.75rem;
+		border-radius: 0.65rem;
+		background: #f7f5ef;
+		color: var(--ink-muted);
+		font-size: 0.75rem;
+	}
+	.player-name-line strong {
+		color: var(--navy);
+	}
+	.name-edit {
+		border: 0;
+		background: transparent;
+		color: var(--navy);
+		font: inherit;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.rename-inline {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.55rem;
+		align-items: end;
+		margin-top: 0.7rem;
+	}
+	.rename-inline label {
+		flex-basis: 100%;
+		color: var(--navy);
+		font-size: 0.75rem;
+		font-weight: 700;
+	}
+	.rename-inline .text-input {
+		flex: 1 1 12rem;
+	}
+	.shared-standings {
+		width: 100%;
+		margin-block: 1rem;
+		text-align: left;
+	}
+	.shared-standings h2 {
+		color: var(--navy);
+		font-size: 1rem;
+	}
+	.standing-row {
+		display: grid;
+		grid-template-columns: 2.5rem 1fr auto;
+		gap: 0.6rem;
+		padding: 0.7rem 0;
+		border-top: 1px solid var(--line);
+		font-size: 0.8rem;
+	}
+	.standing-row span {
+		color: var(--gold-deep);
+		font-weight: 800;
 	}
 
 	.quest-cover {

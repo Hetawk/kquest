@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -22,6 +22,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
     t.datetime "updated_at", null: false
     t.uuid "user_id"
     t.uuid "uploaded_asset_id"
+    t.boolean "shuffle_questions", default: false, null: false
+    t.boolean "speed_scoring", default: true, null: false
     t.index ["uploaded_asset_id"], name: "index_activities_on_uploaded_asset_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'published'::character varying]::text[])", name: "activities_status_valid"
@@ -30,7 +32,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
   create_table "activity_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "activity_id", null: false
     t.integer "version_number", null: false
-    t.string "share_code", limit: 12, null: false
+    t.string "share_code", limit: 6, null: false
     t.jsonb "question_snapshot", default: [], null: false
     t.datetime "published_at", null: false
     t.datetime "created_at", null: false
@@ -51,11 +53,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
     t.datetime "submitted_at", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "total_response_time_ms", default: 0, null: false
+    t.uuid "game_room_id"
+    t.index ["activity_version_id", "game_room_id", "score", "total_response_time_ms"], name: "index_attempts_on_leaderboard"
     t.index ["activity_version_id", "submitted_at"], name: "index_attempts_on_activity_version_id_and_submitted_at"
     t.index ["activity_version_id"], name: "index_attempts_on_activity_version_id"
+    t.index ["game_room_id"], name: "index_attempts_on_game_room_id"
     t.index ["submission_key"], name: "index_attempts_on_submission_key", unique: true
     t.check_constraint "max_score > 0", name: "attempts_max_score_positive"
     t.check_constraint "score >= 0 AND score <= max_score", name: "attempts_score_valid"
+  end
+
+  create_table "game_rooms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "activity_version_id", null: false
+    t.uuid "host_user_id", null: false
+    t.string "room_code", limit: 6, null: false
+    t.string "status", default: "waiting", null: false
+    t.integer "current_question_index", default: 0, null: false
+    t.datetime "question_started_at"
+    t.datetime "ended_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["activity_version_id"], name: "index_game_rooms_on_activity_version_id"
+    t.index ["host_user_id"], name: "index_game_rooms_on_host_user_id"
+    t.index ["room_code"], name: "index_game_rooms_on_room_code", unique: true
+    t.check_constraint "current_question_index >= 0", name: "game_rooms_question_index_nonnegative"
+    t.check_constraint "status::text = ANY (ARRAY['waiting'::character varying, 'active'::character varying, 'completed'::character varying]::text[])", name: "game_rooms_status_valid"
   end
 
   create_table "play_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -73,8 +96,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
     t.jsonb "last_response"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.uuid "game_room_id"
     t.index ["activity_version_id"], name: "index_play_sessions_on_activity_version_id"
     t.index ["expires_at"], name: "index_play_sessions_on_expires_at"
+    t.index ["game_room_id", "start_key"], name: "index_play_sessions_on_game_room_id_and_start_key", unique: true
+    t.index ["game_room_id"], name: "index_play_sessions_on_game_room_id"
     t.index ["start_key"], name: "index_play_sessions_on_start_key", unique: true
     t.index ["submission_key"], name: "index_play_sessions_on_submission_key", unique: true
     t.check_constraint "current_question_index >= 0", name: "play_sessions_question_index_nonnegative"
@@ -137,7 +163,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000003) do
   add_foreign_key "activities", "users"
   add_foreign_key "activity_versions", "activities"
   add_foreign_key "attempts", "activity_versions"
+  add_foreign_key "attempts", "game_rooms"
+  add_foreign_key "game_rooms", "activity_versions"
+  add_foreign_key "game_rooms", "users", column: "host_user_id"
   add_foreign_key "play_sessions", "activity_versions"
+  add_foreign_key "play_sessions", "game_rooms"
   add_foreign_key "questions", "activities"
   add_foreign_key "uploaded_assets", "users"
   add_foreign_key "user_sessions", "users"

@@ -45,11 +45,31 @@ module Api
         )
       end
 
+      def update
+        return unless prototype_api_only?
+
+        activity_version = ActivityVersion.find_by(share_code: normalized_share_code)
+        return render_not_found unless activity_version
+
+        session = activity_version.play_sessions.find_by(id: params[:session_id])
+        return render_not_found unless session
+        return render_error(code: "session_completed", message: "A finished quest name can no longer be changed.", status: :conflict) if session.completed?
+
+        attributes = params.require(:play_session).permit(:learner_name)
+        name = attributes[:learner_name].to_s.strip
+        return render_error(code: "invalid_name", message: "Choose a name between 1 and 80 characters.", status: :unprocessable_entity) unless name.length.between?(1, 80)
+
+        session.update!(learner_name: name)
+        render json: { data: { learner_name: session.learner_name } }
+      rescue ActionController::ParameterMissing
+        render_error(code: "validation_failed", message: "A learner name is required.", status: :unprocessable_entity)
+      end
+
       private
 
       def normalized_share_code
         code = params[:share_code].to_s.upcase
-        return unless code.match?(/\A[A-HJ-NP-Z2-9]{12}\z/)
+        return unless ActivityVersion::CODE_REGEX.match?(code)
 
         code
       end

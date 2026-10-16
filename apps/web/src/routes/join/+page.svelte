@@ -1,20 +1,35 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
+	import { resolveJoinCode } from '#lib/features/activities/api.js';
 
 	let code = $state('');
 	let error = $state('');
+	let resolving = $state(false);
 
-	function submit(event: SubmitEvent) {
+	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		const normalized = code.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
 
-		if (normalized.length !== 12) {
-			error = 'A game code has 12 letters or numbers. Check with your teacher and try again.';
+		if (normalized.length !== 6) {
+			error = 'A game code has 6 letters or numbers. Check with your teacher and try again.';
 			return;
 		}
 
-		void goto(resolve('/play/[code]', { code: normalized }));
+		resolving = true;
+		error = '';
+		try {
+			const destination = await resolveJoinCode(normalized);
+			await goto(
+				destination.kind === 'live_room'
+					? resolve('/room/[code]', { code: normalized })
+					: resolve('/play/[code]', { code: normalized })
+			);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'We couldn’t find that game code.';
+		} finally {
+			resolving = false;
+		}
 	}
 </script>
 
@@ -30,11 +45,12 @@
 		<p class="eyebrow">Your next adventure is waiting</p>
 		<h1 id="join-heading" class="page-heading">You’re in the right place.</h1>
 		<p class="page-intro">
-			Enter the game code your teacher shared. Then bring your best thinking.
+			Enter a game code or open the link your host shared. You’ll choose a display name before
+			joining.
 		</p>
 
 		<form class="join-form" onsubmit={submit}>
-			<label class="field-label" for="join-code">12-character game code</label>
+			<label class="field-label" for="join-code">6-character game code</label>
 			<input
 				id="join-code"
 				class="code-input"
@@ -42,18 +58,27 @@
 				autocomplete="off"
 				autocapitalize="characters"
 				spellcheck="false"
-				maxlength="12"
-				placeholder="e.g. AB3D…"
+				maxlength="6"
+				placeholder="e.g. AB3D7K"
 				bind:value={code}
 				oninput={() => (error = '')}
 				required
 			/>
 			{#if error}<p class="error-message" role="alert">{error}</p>{/if}
-			<button class="button button-primary join-button" type="submit">
-				Find my game <span aria-hidden="true">↗</span>
+			<button class="button button-primary join-button" type="submit" disabled={resolving}>
+				{resolving ? 'Finding your game…' : 'Find my game'} <span aria-hidden="true">↗</span>
 			</button>
 		</form>
-		<p class="join-footer">No account needed to play. Just a little curiosity.</p>
+		<div class="join-choice">
+			<strong>Choose how to join</strong>
+			<p>
+				Play as a guest with no account, or <a href={resolve('/')}>sign in with Google</a> if you prefer.
+				Guest play is always available.
+			</p>
+		</div>
+		<p class="join-footer">
+			Direct links with a game code work too — no need to enter the code twice.
+		</p>
 	</section>
 </main>
 
@@ -164,5 +189,30 @@
 		margin: 1.3rem 0 0;
 		color: var(--ink-muted);
 		font-size: 0.75rem;
+	}
+
+	.join-choice {
+		width: min(100%, 27rem);
+		margin-top: 1.2rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--line);
+		border-radius: 0.8rem;
+		background: #fffdf9;
+		text-align: left;
+	}
+
+	.join-choice strong {
+		color: var(--navy);
+		font-size: 0.78rem;
+	}
+	.join-choice p {
+		margin: 0.3rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.74rem;
+		line-height: 1.55;
+	}
+	.join-choice a {
+		color: var(--navy);
+		font-weight: 700;
 	}
 </style>

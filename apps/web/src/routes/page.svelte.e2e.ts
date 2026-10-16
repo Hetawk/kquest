@@ -14,8 +14,8 @@ test('has expected h1', async ({ page }) => {
 
 test('helps learners recover from an incomplete game code', async ({ page }) => {
 	await page.goto('/join');
-	await page.getByLabel(/12-character game code/i).fill('short');
+	await page.getByLabel(/6-character game code/i).fill('ABCDE');
 	await page.getByRole('button', { name: /find my game/i }).click();
-	await expect(page.getByRole('alert')).toContainText(/12 letters or numbers/i);
+	await expect(page.locator('.join-form [role="alert"]')).toContainText(/6 letters or numbers/i);
 	await expect(page).toHaveURL(/\/join$/);
 });

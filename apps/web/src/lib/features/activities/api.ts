@@ -1,5 +1,9 @@
 import type {
 	PlayActivity,
+	PlayLeaderboard,
+	ResolvedJoinCode,
+	GameRoom,
+	JoinedGameRoom,
 	PlaySession,
 	PlaySessionProgress,
 	PublishedActivity,
@@ -125,6 +129,8 @@ export function createActivity(input: {
 	description: string;
 	questions: QuestionDraft[];
 	cover_image_asset_id?: string;
+	shuffle_questions: boolean;
+	speed_scoring: boolean;
 }) {
 	return request<{ id: string; title: string }>('/api/v1/activities', {
 		method: 'POST',
@@ -141,6 +147,107 @@ export function publishActivity(activityId: string) {
 
 export function fetchActivity(shareCode: string) {
 	return request<PlayActivity>(`/api/v1/play/${encodeURIComponent(shareCode)}`);
+}
+
+export function fetchLeaderboard(shareCode: string) {
+	return request<PlayLeaderboard>(`/api/v1/play/${encodeURIComponent(shareCode)}/leaderboard`);
+}
+
+export function resolveJoinCode(code: string) {
+	return request<ResolvedJoinCode>(`/api/v1/join/${encodeURIComponent(code)}`);
+}
+
+export function createGameRoom(activityId: string) {
+	return request<GameRoom>(`/api/v1/activities/${encodeURIComponent(activityId)}/game_rooms`, {
+		method: 'POST',
+		body: JSON.stringify({})
+	});
+}
+
+export function fetchGameRoom(roomCode: string, sessionId?: string) {
+	const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+	return request<GameRoom>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}${query}`);
+}
+
+export function joinGameRoom(input: {
+	roomCode: string;
+	learnerName: string;
+	idempotencyKey: string;
+}) {
+	return request<JoinedGameRoom>(
+		`/api/v1/game_rooms/${encodeURIComponent(input.roomCode)}/participants`,
+		{
+			method: 'POST',
+			headers: { 'Idempotency-Key': input.idempotencyKey },
+			body: JSON.stringify({ participant: { learner_name: input.learnerName } })
+		}
+	);
+}
+
+export function renameGameRoomParticipant(input: {
+	roomCode: string;
+	sessionId: string;
+	learnerName: string;
+}) {
+	return request<{ learner_name: string }>(
+		`/api/v1/game_rooms/${encodeURIComponent(input.roomCode)}/participants/${encodeURIComponent(input.sessionId)}`,
+		{
+			method: 'PATCH',
+			body: JSON.stringify({ participant: { learner_name: input.learnerName } })
+		}
+	);
+}
+
+export function startGameRoom(roomCode: string) {
+	return request<GameRoom>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}/start`, {
+		method: 'POST',
+		body: JSON.stringify({})
+	});
+}
+
+export function advanceGameRoom(roomCode: string) {
+	return request<GameRoom>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}/advance`, {
+		method: 'POST',
+		body: JSON.stringify({})
+	});
+}
+
+export function answerGameRoomQuestion(input: {
+	roomCode: string;
+	sessionId: string;
+	questionId: string;
+	optionId: string | null;
+	idempotencyKey: string;
+}) {
+	return request<{
+		complete: false;
+		is_correct: boolean;
+		timed_out: boolean;
+		points_awarded: number;
+		speed_bonus: number;
+		question_index: number;
+	}>(
+		`/api/v1/game_rooms/${encodeURIComponent(input.roomCode)}/participants/${encodeURIComponent(input.sessionId)}/answers`,
+		{
+			method: 'POST',
+			headers: { 'Idempotency-Key': input.idempotencyKey },
+			body: JSON.stringify({ answer: { question_id: input.questionId, option_id: input.optionId } })
+		}
+	);
+}
+
+export function renamePlaySession(input: {
+	shareCode: string;
+	sessionId: string;
+	learnerName: string;
+}) {
+	return request<{ learner_name: string }>(
+		`/api/v1/play/${encodeURIComponent(input.shareCode)}/sessions/${encodeURIComponent(input.sessionId)}`,
+		{
+			method: 'PATCH',
+			body: JSON.stringify({ play_session: { learner_name: input.learnerName } })
+		}
+	);
 }
 
 export function startPlaySession(input: {

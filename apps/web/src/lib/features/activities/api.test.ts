@@ -17,7 +17,7 @@ describe('learning journey API client', () => {
 				data: {
 					id: 'version-id',
 					title: 'A quest',
-					share_code: 'ABCD23456789',
+					share_code: 'ABCD23',
 					cover_image_url: null,
 					questions: []
 				}
@@ -25,10 +25,10 @@ describe('learning journey API client', () => {
 		);
 		vi.stubGlobal('fetch', fetchMock);
 
-		await fetchActivity('ABCD23456789');
+		await fetchActivity('ABCD23');
 
 		expect(fetchMock).toHaveBeenCalledWith(
-			'/api/v1/play/ABCD23456789',
+			'/api/v1/play/ABCD23',
 			expect.objectContaining({
 				credentials: 'same-origin',
 				headers: expect.any(Headers)
@@ -59,7 +59,7 @@ describe('learning journey API client', () => {
 		vi.stubGlobal('fetch', fetchMock);
 
 		await startPlaySession({
-			shareCode: 'ABCD23456789',
+			shareCode: 'ABCD23',
 			learnerName: 'Jordan',
 			idempotencyKey: '00000000-0000-4000-8000-000000000001'
 		});
@@ -70,7 +70,7 @@ describe('learning journey API client', () => {
 			expect.objectContaining({ credentials: 'same-origin' })
 		);
 		const [path, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
-		expect(path).toBe('/api/v1/play/ABCD23456789/sessions');
+		expect(path).toBe('/api/v1/play/ABCD23/sessions');
 		expect(init.method).toBe('POST');
 		expect(init.credentials).toBe('same-origin');
 		expect(init.body).toBe(
@@ -105,7 +105,7 @@ describe('learning journey API client', () => {
 		vi.stubGlobal('fetch', fetchMock);
 
 		await answerPlayQuestion({
-			shareCode: 'ABCD23456789',
+			shareCode: 'ABCD23',
 			sessionId: 'session-id',
 			questionId: 'question-id',
 			optionId: null,
@@ -113,7 +113,7 @@ describe('learning journey API client', () => {
 		});
 
 		const [path, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
-		expect(path).toBe('/api/v1/play/ABCD23456789/sessions/session-id/answers');
+		expect(path).toBe('/api/v1/play/ABCD23/sessions/session-id/answers');
 		expect(init.method).toBe('POST');
 		expect(init.body).toBe(
 			JSON.stringify({ answer: { question_id: 'question-id', option_id: null } })

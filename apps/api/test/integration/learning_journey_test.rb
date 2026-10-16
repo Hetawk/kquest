@@ -24,12 +24,14 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     OmniAuth.config.mock_auth[:google_oauth2] = nil
   end
 
-  def create_activity(questions: [ question_definition ])
+  def create_activity(questions: [ question_definition ], shuffle_questions: false, speed_scoring: true)
     post "/api/v1/activities",
       params: {
         activity: {
           title: "The Solar System Sprint",
           description: "A quick trip through our cosmic neighborhood.",
+          shuffle_questions: shuffle_questions,
+          speed_scoring: speed_scoring,
           questions: questions
         }
       },
@@ -92,7 +94,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     )
     publication = publish_activity(activity_id)
 
-    assert_match(/\A[A-HJ-NP-Z2-9]{12}\z/, publication.fetch("share_code"))
+    assert_match(/\A[A-HJ-NP-Z2-9]{6}\z/, publication.fetch("share_code"))
     assert_equal 1, publication.fetch("version")
     get "/api/v1/play/#{publication.fetch("share_code")}"
 
@@ -132,10 +134,175 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     )
     assert_response :success
     result = response.parsed_body.fetch("data").fetch("attempt")
-    assert_equal 200, result.fetch("score")
-    assert_equal 200, result.fetch("max_score")
+    assert_equal 300, result.fetch("score")
+    assert_equal 300, result.fetch("max_score")
     assert_equal false, result.fetch("results").first.fetch("timed_out")
     assert_equal 1, Attempt.count
+  end
+
+  test "speed scoring awards a server-measured proportional bonus and caps the maximum" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
+    publication = publish_activity(activity_id)
+    question = publication_question(publication)
+    session = start_session(publication.fetch("share_code"))
+
+    travel 5.seconds do
+      answer_question(
+        share_code: publication.fetch("share_code"),
+        session_id: session.fetch("id"),
+        question_id: question.fetch("id"),
+        option_id: question.fetch("options")[0].fetch("id")
+      )
+    end
+
+    assert_response :success
+    result = response.parsed_body.dig("data", "attempt")
+    assert_equal 200, result.fetch("max_score")
+    response_time_ms = result.fetch("results").first.fetch("response_time_ms")
+    expected_bonus = (100 * [ 1 - response_time_ms / 10_000.0, 0 ].max).round
+    assert_equal 100 + expected_bonus, result.fetch("score")
+    assert_equal expected_bonus, result.fetch("results").first.fetch("speed_bonus")
+    assert_operator response_time_ms, :>=, 0
+  end
+
+  test "speed scoring can be disabled and published questions can be shuffled" do
+    activity_id = create_activity(
+      questions: [
+        question_definition(prompt: "Alpha", time_limit_seconds: 10),
+        question_definition(prompt: "Bravo", time_limit_seconds: 10),
+        question_definition(prompt: "Charlie", time_limit_seconds: 10)
+      ],
+      shuffle_questions: true,
+      speed_scoring: false
+    )
+    publication = publish_activity(activity_id)
+    version = ActivityVersion.find_by!(share_code: publication.fetch("share_code"))
+
+    assert_equal false, version.question_snapshot.first.fetch("speed_scoring")
+    assert_equal 3, version.question_snapshot.length
+    version.question_snapshot.each do |question|
+      assert_includes question.fetch("options").map { |option| option.fetch("id") }, question.fetch("correct_option_id")
+    end
+
+    session = start_session(publication.fetch("share_code"))
+    publication_questions(publication).each do |question|
+      answer_question(
+        share_code: publication.fetch("share_code"),
+        session_id: session.fetch("id"),
+        question_id: question.fetch("id"),
+        option_id: question.fetch("options")[0].fetch("id")
+      )
+      assert_response :success
+    end
+
+    result = response.parsed_body.dig("data", "attempt")
+    assert_equal 300, result.fetch("score")
+    assert_equal 300, result.fetch("max_score")
+    assert_equal [ 0, 0, 0 ], result.fetch("results").map { |item| item.fetch("speed_bonus") }
+  end
+
+  test "host-paced rooms synchronize participants and publish a finalized podium" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
+    publication = publish_activity(activity_id)
+    post "/api/v1/activities/#{activity_id}/game_rooms",
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :created
+    room_code = response.parsed_body.dig("data", "room_code")
+    assert_match(/\A[A-HJ-NP-Z2-9]{6}\z/, room_code)
+    get "/api/v1/join/#{room_code}"
+    assert_response :success
+    assert_equal "live_room", response.parsed_body.dig("data", "kind")
+    assert_equal "/room/#{room_code}", response.parsed_body.dig("data", "path")
+
+    post "/api/v1/game_rooms/#{room_code}/participants",
+      params: { participant: { learner_name: "Jordan" } },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :created
+    session_id = response.parsed_body.dig("data", "session_id")
+
+    patch "/api/v1/game_rooms/#{room_code}/participants/#{session_id}",
+      params: { participant: { learner_name: "Jordan Updated" } },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    assert_equal "Jordan Updated", response.parsed_body.dig("data", "learner_name")
+
+    post "/api/v1/game_rooms/#{room_code}/start",
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    assert_equal "active", response.parsed_body.dig("data", "status")
+
+    question = publication_question(publication)
+    post "/api/v1/game_rooms/#{room_code}/participants/#{session_id}/answers",
+      params: { answer: { question_id: question.fetch("id"), option_id: question.fetch("options")[0].fetch("id") } },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    assert_operator response.parsed_body.dig("data", "points_awarded"), :>, 100
+
+    post "/api/v1/game_rooms/#{room_code}/advance",
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    assert_equal "completed", response.parsed_body.dig("data", "status")
+    assert_equal true, response.parsed_body.dig("data", "standings_final")
+    assert_equal "Jordan Updated", response.parsed_body.dig("data", "podium", 0, "learner_name")
+    assert_equal 1, Attempt.where(game_room_id: GameRoom.find_by!(room_code: room_code).id).count
+  end
+
+  test "join links resolve both live rooms and self-paced activities" do
+    activity_id = create_activity
+    publication = publish_activity(activity_id)
+
+    get "/api/v1/join/#{publication.fetch("share_code")}"
+    assert_response :success
+    assert_equal "self_paced", response.parsed_body.dig("data", "kind")
+    assert_equal "/play/#{publication.fetch("share_code")}", response.parsed_body.dig("data", "path")
+
+    get "/api/v1/join/ABCD23456789"
+    assert_response :not_found
+  end
+
+  test "participant-paced leaderboard stays provisional and ranks server-scored attempts" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
+    publication = publish_activity(activity_id)
+    question = publication_question(publication)
+
+    fast_session = start_play_session(share_code: publication.fetch("share_code"), name: "Fast Learner")
+    assert_response :created
+    fast_session = response.parsed_body.fetch("data")
+    answer_question(
+      share_code: publication.fetch("share_code"),
+      session_id: fast_session.fetch("id"),
+      question_id: question.fetch("id"),
+      option_id: question.fetch("options")[0].fetch("id")
+    )
+    assert_response :success
+
+    slower_session = start_play_session(share_code: publication.fetch("share_code"), name: "Second Learner")
+    assert_response :created
+    slower_session = response.parsed_body.fetch("data")
+    travel 5.seconds do
+      answer_question(
+        share_code: publication.fetch("share_code"),
+        session_id: slower_session.fetch("id"),
+        question_id: question.fetch("id"),
+        option_id: question.fetch("options")[0].fetch("id")
+      )
+    end
+    assert_response :success
+
+    get "/api/v1/play/#{publication.fetch("share_code")}/leaderboard"
+
+    assert_response :success
+    leaderboard = response.parsed_body.fetch("data")
+    assert_equal "provisional", leaderboard.fetch("status")
+    assert_equal 2, leaderboard.fetch("participant_count")
+    assert_equal "Fast Learner", leaderboard.fetch("podium").first.fetch("learner_name")
+    assert_equal [ 1, 2 ], leaderboard.fetch("standings").map { |entry| entry.fetch("rank") }
   end
 
   test "starts a play session idempotently without creating duplicates" do

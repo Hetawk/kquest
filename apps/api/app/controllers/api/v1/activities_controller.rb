@@ -11,6 +11,8 @@ module Api
           :title,
           :description,
           :cover_image_asset_id,
+          :shuffle_questions,
+          :speed_scoring,
           questions: [ :prompt, :correct_option_id, :points, :time_limit_seconds, { options: [ :id, :text ] } ]
         )
         question_definitions = attributes.delete(:questions) || []
@@ -27,7 +29,9 @@ module Api
         activity = current_user.activities.build(
           title: attributes[:title],
           description: attributes[:description],
-          uploaded_asset: uploaded_asset
+          uploaded_asset: uploaded_asset,
+          shuffle_questions: ActiveModel::Type::Boolean.new.cast(attributes[:shuffle_questions]),
+          speed_scoring: attributes[:speed_scoring].nil? || ActiveModel::Type::Boolean.new.cast(attributes[:speed_scoring])
         )
         question_definitions.each_with_index do |definition, index|
           activity.questions.build(

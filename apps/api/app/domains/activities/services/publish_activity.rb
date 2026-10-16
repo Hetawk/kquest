@@ -25,6 +25,8 @@ module Activities
               "time_limit_seconds"
             )
           end
+          questions.each { |question| question["speed_scoring"] = activity.speed_scoring? }
+          questions.shuffle! if activity.shuffle_questions?
 
           version = activity.activity_versions.create!(
             version_number: activity.activity_versions.maximum(:version_number).to_i + 1,

@@ -888,6 +888,34 @@ Scoring policies must specify:
 
 Speed should never be mandatory as a scoring factor. Educators should be able to disable speed bonuses and use mastery-oriented scoring.
 
+### 8.6 Group play, scoring, and rankings
+
+KINGDOM Quest supports two distinct group-play modes, selected by the host when publishing a quest:
+
+- **Participant-paced:** Each learner starts and completes an independent attempt. Scores feed a shared provisional leaderboard as participants finish; the leaderboard is not presented as final while the activity remains open.
+- **Host-paced live room:** A host creates a room with its own join code and direct link. Participants join the waiting room as guests or signed-in users. The host starts the room and controls each question transition and the end of the game. Every participant sees the same question index and server start time.
+
+Live-room participant answers are recorded independently against the shared round deadline. Advancing a round records zero for any participant who has not answered, then starts the next question for all participants. The host must be authorized as the room owner for state-changing host commands. Guest participants receive unguessable session identifiers; room codes are for joining, not authorization. Production release requires abuse controls, retention policy, authenticated host roles, and real-time delivery/authorization review.
+
+The default speed policy is proportional and server-authoritative:
+
+`award = base_points + round(base_points * max(0, 1 - elapsed_seconds / time_limit_seconds))`
+
+This applies only to correct answers on timed questions when speed scoring is enabled. It awards the configured base at the deadline and up to a 100% speed bonus for a near-immediate answer. Untimed questions award base points only; incorrect and timed-out answers award zero. The server measures elapsed time and calculates the score; clients cannot submit a claimed score or response time. Educators can disable speed scoring. The displayed maximum for a question is twice its configured points only when it has a timer and speed scoring is enabled.
+
+Rankings sort by total points descending, then cumulative server-recorded answer time ascending, then display name as a stable final tie-break. Completed participant-paced attempts contribute to a provisional leaderboard. Host-paced room standings include current persisted scores and become final only after the host ends the last round. Results show the top three in a visual podium, with first place centered; rankings remain available below the podium. A ranking is not a substitute for reporting correctness and learning progress.
+
+Joining supports a six-character uppercase letter-and-number code and a direct `/join/{code}` link, which resolves to either a participant-paced activity or a live room. Codes omit ambiguous characters (`I`, `O`, `0`, and `1`). The six-character migration rotates previously issued codes, so hosts must share updated links/codes after deployment. After resolving the code, a learner chooses a display name and may change it until their active live round is answered (or until a self-paced attempt is complete). Guest play does not require an account; Google sign-in is an optional choice and must not block guest access.
+
+### 8.7 Question authoring, import, and shuffle
+
+- An activity supports 1–100 single-choice questions.
+- Educators may author questions in the editor or import a CSV/XLSX workbook. Imported questions are parsed locally, capped at 5 MB and 100 rows, validated against the same question limits, and added to the editor for review and correction before publishing. Import never publishes content directly.
+- The CSV/XLSX first row uses these case-insensitive columns: `question`, `option_a`, `option_b`, optional contiguous `option_c` through `option_f`, `correct_answer`, optional `points`, and optional `time_limit_seconds`. `correct_answer` is either an option letter or an exact answer label. Points default to 100 and timers default to 30 seconds; `0` means untimed. A downloadable CSV example is included in the web app.
+- Hosts may request shuffled question order. The order is randomized once while building the immutable published version, not on each browser refresh or between participants; question IDs, answer choices, and correct-answer mapping stay attached.
+
+The first implementation polls room state over REST and uses database-backed timestamps and records for correctness. Action Cable or another authenticated push transport can replace polling without changing the room state machine or scoring authority.
+
 ## 9. Database design and data integrity
 
 PostgreSQL is the authoritative persistence layer. The database must protect important invariants independently of the API.

@@ -54,7 +54,7 @@ module Api
 
       def normalized_share_code
         code = params[:share_code].to_s.upcase
-        return unless code.match?(/\A[A-HJ-NP-Z2-9]{12}\z/)
+        return unless ActivityVersion::CODE_REGEX.match?(code)
 
         code
       end

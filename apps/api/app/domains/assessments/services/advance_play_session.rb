@@ -16,14 +16,14 @@ module Assessments
         result = nil
         PlaySession.transaction do
           session.lock!
-          response_fingerprint = Digest::SHA256.hexdigest([ question_id, option_id ].to_json)
+          fingerprint = Digest::SHA256.hexdigest([ question_id, option_id ].to_json)
           if session.last_request_key == request_key
-            raise IdempotencyConflict unless session.last_request_fingerprint == response_fingerprint
+            raise IdempotencyConflict unless session.last_request_fingerprint == fingerprint
 
             result = session.last_response
             next
           end
-          raise InvalidAnswer if session.completed? || session.expires_at <= Time.current
+          raise InvalidAnswer if session.game_room || session.completed? || session.expires_at <= Time.current
 
           snapshots = session.activity_version.question_snapshot
           question = snapshots[session.current_question_index]
@@ -31,7 +31,8 @@ module Assessments
 
           time_limit = question.fetch("time_limit_seconds", Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS)
           now = Time.current
-          timed_out = time_limit.positive? && now >= session.question_started_at + time_limit.seconds
+          elapsed_seconds = [ now - session.question_started_at, 0 ].max
+          timed_out = time_limit.positive? && elapsed_seconds >= time_limit
           raise QuestionNotExpired if option_id.nil? && !timed_out
 
           if option_id && !timed_out &&
@@ -40,8 +41,25 @@ module Assessments
           end
 
           recorded_option_id = timed_out ? nil : option_id
-          responses = session.responses + [ { "question_id" => question_id, "option_id" => recorded_option_id } ]
-          is_correct = recorded_option_id.present? && recorded_option_id == question.fetch("correct_option_id")
+          award = if recorded_option_id
+            Questions::Types::SingleChoice.score_with_speed(
+              question: question,
+              selected_option_id: recorded_option_id,
+              elapsed_seconds: elapsed_seconds
+            )
+          else
+            { points_awarded: 0, speed_bonus: 0 }
+          end
+          response = {
+            "question_id" => question_id,
+            "option_id" => recorded_option_id,
+            "points_awarded" => award.fetch(:points_awarded),
+            "speed_bonus" => award.fetch(:speed_bonus),
+            "response_time_ms" => recorded_option_id ? (elapsed_seconds * 1000).round : nil,
+            "answered_at" => recorded_option_id ? now.iso8601(6) : nil
+          }
+          responses = session.responses + [ response ]
+          is_correct = award.fetch(:points_awarded).positive?
 
           if session.current_question_index + 1 == snapshots.length
             attempt, = SubmitAttempt.call(
@@ -54,6 +72,8 @@ module Assessments
               "complete" => true,
               "is_correct" => is_correct,
               "timed_out" => timed_out,
+              "points_awarded" => award.fetch(:points_awarded),
+              "speed_bonus" => award.fetch(:speed_bonus),
               "attempt" => Activities::Serializers::PlaySerializer.result(attempt)
             }
             session.update!(
@@ -61,7 +81,7 @@ module Assessments
               completed_at: now,
               question_started_at: nil,
               last_request_key: request_key,
-              last_request_fingerprint: response_fingerprint,
+              last_request_fingerprint: fingerprint,
               last_response: result
             )
           else
@@ -75,6 +95,8 @@ module Assessments
               "complete" => false,
               "is_correct" => is_correct,
               "timed_out" => timed_out,
+              "points_awarded" => award.fetch(:points_awarded),
+              "speed_bonus" => award.fetch(:speed_bonus),
               "question_index" => next_index,
               "time_limit_seconds" => next_limit,
               "question_started_at" => now.iso8601(6),
@@ -85,7 +107,7 @@ module Assessments
               current_question_index: next_index,
               question_started_at: now,
               last_request_key: request_key,
-              last_request_fingerprint: response_fingerprint,
+              last_request_fingerprint: fingerprint,
               last_response: result
             )
           end

@@ -1,5 +1,6 @@
 class Attempt < ApplicationRecord
   belongs_to :activity_version
+  belongs_to :game_room, optional: true
 
   validates :learner_name, presence: true, length: { maximum: 80 }
   validates :submission_key, presence: true, uniqueness: true,

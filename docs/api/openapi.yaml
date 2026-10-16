@@ -170,6 +170,12 @@ paths:
                       cover_image_asset_id:
                         type: string
                         format: uuid
+                      shuffle_questions:
+                        type: boolean
+                        default: false
+                      speed_scoring:
+                        type: boolean
+                        default: true
                       questions:
                         type: array
                         items:
@@ -230,8 +236,11 @@ paths:
                   properties:
                     data:
                       type: object
-                      required: [title, version, share_code, play_path]
+                      required: [activity_id, title, version, share_code, play_path]
                       properties:
+                        activity_id:
+                          type: string
+                          format: uuid
                         title:
                           type: string
                         version:
@@ -266,6 +275,277 @@ paths:
                       $ref: "#/components/schemas/PlayActivity"
         "404":
           $ref: "#/components/responses/NotFound"
+  /join/{code}:
+    get:
+      operationId: resolveGameCode
+      summary: Resolve an activity code or live-room code
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-HJ-NP-Z2-9]{6}$"
+      responses:
+        "200":
+          description: Destination for the public join link.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [kind, path]
+                    properties:
+                      kind:
+                        type: string
+                        enum: [self_paced, live_room]
+                      path:
+                        type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /play/{share_code}/leaderboard:
+    get:
+      operationId: getProvisionalLeaderboard
+      summary: Get completed participant-paced attempts
+      description: Standings are provisional and sorted by score, cumulative response time, and display name.
+      parameters:
+        - $ref: "#/components/parameters/ShareCode"
+      responses:
+        "200":
+          description: Current provisional standings and top-three podium.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [status, participant_count, podium, standings]
+                    properties:
+                      status:
+                        type: string
+                        const: provisional
+                      participant_count:
+                        type: integer
+                      podium:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LeaderboardEntry"
+                      standings:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LeaderboardEntry"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /activities/{activity_id}/game_rooms:
+    post:
+      operationId: createGameRoom
+      summary: Create a host-controlled room for a published activity
+      description: The signed-in activity owner receives a unique room code and join link.
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: activity_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "201":
+          description: Waiting room created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GameRoom"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /game_rooms/{room_code}:
+    get:
+      operationId: getGameRoom
+      summary: Get live room state and standings
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - name: session_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current room, synchronized question, participant list, and standings.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GameRoom"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /game_rooms/{room_code}/participants:
+    post:
+      operationId: joinGameRoom
+      summary: Join a waiting room as a guest participant
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participant]
+              properties:
+                participant:
+                  type: object
+                  required: [learner_name]
+                  properties:
+                    learner_name:
+                      type: string
+                      minLength: 1
+                      maxLength: 80
+      responses:
+        "201":
+          description: Guest joined the waiting room.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /game_rooms/{room_code}/start:
+    post:
+      operationId: startGameRoom
+      summary: Start the first synchronized round
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Room moved to active state.
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "409":
+          description: Room is not waiting.
+  /game_rooms/{room_code}/participants/{session_id}:
+    patch:
+      operationId: renameGameRoomParticipant
+      summary: Change a participant display name before answering the active round
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participant]
+              properties:
+                participant:
+                  type: object
+                  required: [learner_name]
+                  properties:
+                    learner_name:
+                      type: string
+                      minLength: 1
+                      maxLength: 80
+      responses:
+        "200":
+          description: Display name changed.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The participant already answered the current round.
+  /game_rooms/{room_code}/participants/{session_id}/answers:
+    post:
+      operationId: answerLiveRound
+      summary: Record a participant answer against the room's shared deadline
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer]
+              properties:
+                answer:
+                  type: object
+                  required: [question_id]
+                  properties:
+                    question_id:
+                      type: string
+                      format: uuid
+                    option_id:
+                      type: [string, "null"]
+                      format: uuid
+      responses:
+        "200":
+          description: Server-scored response recorded.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Idempotency conflict or round deadline has not elapsed.
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /game_rooms/{room_code}/advance:
+    post:
+      operationId: advanceGameRoom
+      summary: End the current round and start the next, or finalize the room
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Room moved to the next round or completed state.
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "409":
+          description: Room is not active.
   /play/{share_code}/sessions:
     parameters:
       - $ref: "#/components/parameters/ShareCode"
@@ -371,6 +651,42 @@ paths:
           description: Request key conflict or timeout has not yet elapsed.
         "422":
           $ref: "#/components/responses/ValidationError"
+  /play/{share_code}/sessions/{session_id}:
+    patch:
+      operationId: renamePlaySession
+      summary: Change a learner display name before the attempt completes
+      parameters:
+        - $ref: "#/components/parameters/ShareCode"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [play_session]
+              properties:
+                play_session:
+                  type: object
+                  required: [learner_name]
+                  properties:
+                    learner_name:
+                      type: string
+                      minLength: 1
+                      maxLength: 80
+      responses:
+        "200":
+          description: Display name changed.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The attempt is already complete.
 components:
   securitySchemes:
     sessionCookie:
@@ -390,7 +706,14 @@ components:
       required: true
       schema:
         type: string
-        pattern: "^[A-HJ-NP-Z2-9]{12}$"
+        pattern: "^[A-HJ-NP-Z2-9]{6}$"
+    RoomCode:
+      name: room_code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-HJ-NP-Z2-9]{6}$"
   responses:
     AuthenticationError:
       description: Sign-in is required.
@@ -520,7 +843,7 @@ components:
           type: array
           items:
             type: object
-            required: [id, prompt, points, time_limit_seconds, options]
+            required: [id, prompt, points, speed_scoring, time_limit_seconds, options]
             properties:
               id:
                 type: string
@@ -529,6 +852,8 @@ components:
                 type: string
               points:
                 type: integer
+              speed_scoring:
+                type: boolean
               time_limit_seconds:
                 $ref: "#/components/schemas/QuestionTimeLimitSeconds"
               options:
@@ -564,7 +889,7 @@ components:
           format: date-time
     PlaySessionProgress:
       type: object
-      required: [complete, is_correct, timed_out]
+      required: [complete, is_correct, timed_out, points_awarded, speed_bonus]
       properties:
         complete:
           type: boolean
@@ -573,6 +898,12 @@ components:
           description: Correctness of only the submitted answer; answer identifiers are withheld until completion.
         timed_out:
           type: boolean
+        points_awarded:
+          type: integer
+        base_points:
+          type: integer
+        speed_bonus:
+          type: integer
         question_index:
           type: integer
           minimum: 0
@@ -597,7 +928,7 @@ components:
               const: true
     AttemptResult:
       type: object
-      required: [id, learner_name, score, max_score, results]
+      required: [id, learner_name, score, max_score, total_response_time_ms, results]
       properties:
         id:
           type: string
@@ -608,6 +939,9 @@ components:
           type: integer
         max_score:
           type: integer
+        total_response_time_ms:
+          type: integer
+          minimum: 0
         results:
           type: array
           items:
@@ -638,6 +972,79 @@ components:
                 type: integer
               points_possible:
                 type: integer
+              speed_bonus:
+                type: integer
+              response_time_ms:
+                type: [integer, "null"]
+              correct:
+                type: boolean
+    LeaderboardEntry:
+      type: object
+      required: [rank, learner_name, score, response_time_ms]
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        learner_name:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+        max_score:
+          type: [integer, "null"]
+        response_time_ms:
+          type: integer
+          minimum: 0
+    GameRoom:
+      type: object
+      required: [room_code, title, status, question_index, question_count, current_question, time_remaining_seconds, server_time, participant_count, answered_count, participants, participant, standings, podium, standings_final]
+      properties:
+        room_code:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [waiting, active, completed]
+        question_index:
+          type: integer
+        question_count:
+          type: integer
+        current_question:
+          type: [object, "null"]
+        time_remaining_seconds:
+          type: number
+          minimum: 0
+        server_time:
+          type: string
+          format: date-time
+        participant_count:
+          type: integer
+        answered_count:
+          type: integer
+        participants:
+          type: array
+          items:
+            type: object
+            required: [learner_name, completed]
+            properties:
+              learner_name:
+                type: string
+              completed:
+                type: boolean
+        participant:
+          type: [object, "null"]
+        standings:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+        podium:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/LeaderboardEntry"
+        standings_final:
+          type: boolean
     ErrorResponse:
       type: object
       required: [error]
