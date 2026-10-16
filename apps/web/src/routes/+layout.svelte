@@ -13,7 +13,7 @@
 	let currentUser = $state<Awaited<ReturnType<typeof getCurrentUser>>>(null);
 	let authError = $state('');
 	let authNotice = $state('');
-	let isNavigating = $derived(navigating !== null);
+	let isNavigating = $derived(navigating.to !== null);
 
 	onMount(() => {
 		const status = new URLSearchParams(window.location.search).get('auth');

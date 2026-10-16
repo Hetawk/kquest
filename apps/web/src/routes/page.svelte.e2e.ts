@@ -16,6 +16,9 @@ test('has expected h1', async ({ page }) => {
 		'href',
 		'/join'
 	);
+	await page.getByRole('link', { name: /i have a game code/i }).click();
+	await expect(page).toHaveURL(/\/join$/);
+	await expect(page.locator('.route-loading')).toHaveCount(0);
 });
 
 test('helps learners recover from an incomplete game code', async ({ page }) => {
@@ -298,6 +301,12 @@ test('opens session setup and creates a live lobby with a join QR code and parti
 test('resolves a QR invite from the stable join URL to the room display-name form', async ({
 	page
 }) => {
+	await page.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			status: 401,
+			json: { error: { code: 'authentication_required', message: 'Sign in to continue.' } }
+		})
+	);
 	await page.route('**/api/v1/join/KQST23', (route) =>
 		route.fulfill({ json: { data: { kind: 'live_room', path: '/room/KQST23' } } })
 	);
@@ -330,4 +339,103 @@ test('resolves a QR invite from the stable join URL to the room display-name for
 	await expect(page).toHaveURL(/\/room\/KQST23$/);
 	await expect(page.getByRole('heading', { name: 'Phone join test' })).toBeVisible();
 	await expect(page.getByLabel('Your display name')).toBeVisible();
+});
+
+test('adds a guest to the host roster as soon as they join the live room', async ({
+	context,
+	page
+}) => {
+	const participants: Array<{ learner_name: string; completed: boolean; answered: boolean }> = [];
+	let sessionStarted = false;
+	const room = () => {
+		const activeQuestion = sessionStarted
+			? {
+					id: 'question-id',
+					prompt: 'First live question',
+					question_type: 'single_choice' as const,
+					points: 100,
+					speed_scoring: true,
+					time_limit_seconds: 30,
+					options: [
+						{ id: 'option-a', text: 'Answer A' },
+						{ id: 'option-b', text: 'Answer B' }
+					]
+				}
+			: null;
+		return {
+			room_code: 'KQST23',
+			title: 'Live roster test',
+			status: sessionStarted ? ('active' as const) : ('waiting' as const),
+			question_index: 0,
+			question_count: 1,
+			current_question: activeQuestion,
+			question_started_at: sessionStarted ? '2026-10-16T12:00:00Z' : null,
+			time_remaining_seconds: sessionStarted ? 30 : 0,
+			server_time: '2026-10-16T12:00:00Z',
+			participant_count: participants.length,
+			answered_count: 0,
+			participants: [...participants],
+			participant: null,
+			standings: [],
+			podium: [],
+			standings_final: false
+		};
+	};
+
+	await context.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			json: {
+				data: { id: 'educator-id', email: 'educator@example.test', name: 'Educator' }
+			}
+		})
+	);
+	await context.route('**/api/v1/auth/csrf', (route) =>
+		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
+	);
+	await context.route('**/api/v1/join/KQST23', (route) =>
+		route.fulfill({ json: { data: { kind: 'live_room', path: '/room/KQST23' } } })
+	);
+	await context.route(/\/api\/v1\/game_rooms\/KQST23(?:\?.*)?$/, (route) =>
+		route.fulfill({ json: { data: room() } })
+	);
+	await context.route('**/api/v1/game_rooms/KQST23/start', async (route) => {
+		sessionStarted = true;
+		await route.fulfill({ json: { data: room() } });
+	});
+	await context.route('**/api/v1/game_rooms/KQST23/participants', async (route) => {
+		const body = route.request().postDataJSON() as { participant: { learner_name: string } };
+		const participant = {
+			learner_name: body.participant.learner_name,
+			completed: false,
+			answered: false
+		};
+		participants.push(participant);
+		await route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					session_id: 'participant-session-id',
+					learner_name: participant.learner_name,
+					room: {
+						...room(),
+						participant: { learner_name: participant.learner_name, answered: false }
+					}
+				}
+			}
+		});
+	});
+
+	await page.goto('/host/room/KQST23');
+	await expect(page.getByText('No one has joined yet')).toBeVisible();
+
+	const learnerPage = await context.newPage();
+	await learnerPage.goto('/join?code=KQST23');
+	await expect(learnerPage.getByLabel('Your display name')).toBeVisible();
+	await learnerPage.getByLabel('Your display name').fill('Maya');
+	await learnerPage.getByRole('button', { name: 'Join as a guest' }).click();
+	await expect(learnerPage.getByText('Waiting room')).toBeVisible();
+	await expect(page.getByText('Maya')).toBeVisible({ timeout: 5000 });
+	await page.getByRole('button', { name: 'Start now' }).click();
+	await expect(page.getByRole('heading', { name: 'First live question' })).toBeVisible();
+	await expect(page.getByText('0 / 1 answered')).toBeVisible();
 });
