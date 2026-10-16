@@ -42,7 +42,7 @@ module Assessments
           raise InvalidAnswer unless question && question.fetch("id") == question_id
           raise InvalidAnswer if session.responses.any? { |item| item["question_id"] == question_id }
 
-          time_limit = question.fetch("time_limit_seconds", Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS)
+          time_limit = Questions::Types::SingleChoice.live_time_limit_seconds(question)
           now = Time.current
           elapsed_seconds = [ now - room.question_started_at, 0 ].max
           timed_out = time_limit.positive? && elapsed_seconds >= time_limit

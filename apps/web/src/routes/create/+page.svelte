@@ -55,6 +55,7 @@
 	let speedScoring = $state(true);
 	let gameMode = $state<'self_paced' | 'host_paced'>('self_paced');
 	let questionOrderNotice = $state('');
+	let draggedQuestionId = $state('');
 	const maxQuestions = 100;
 
 	onMount(() => {
@@ -91,7 +92,7 @@
 						correct_option_ids: correctOptionIds,
 						points: question.points,
 						speed_bonus_points: question.speed_bonus_points ?? question.points,
-						time_limit_seconds: question.time_limit_seconds
+						time_limit_seconds: question.time_limit_seconds || 30
 					};
 				});
 				selectedQuestionId = questions[0]?.client_id ?? '';
@@ -120,6 +121,34 @@
 		[reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
 		questions = reordered;
 		questionOrderNotice = `Question moved to position ${destination + 1}.`;
+	}
+
+	function moveQuestionTo(questionId: string, destination: number) {
+		const source = questions.findIndex((question) => question.client_id === questionId);
+		if (source < 0 || destination < 0 || destination >= questions.length || source === destination)
+			return;
+
+		const reordered = [...questions];
+		const [moved] = reordered.splice(source, 1);
+		if (!moved) return;
+		reordered.splice(destination, 0, moved);
+		questions = reordered;
+		questionOrderNotice = `Question moved to position ${destination + 1}.`;
+	}
+
+	function startQuestionDrag(event: DragEvent, questionId: string) {
+		draggedQuestionId = questionId;
+		if (event.dataTransfer) {
+			event.dataTransfer.effectAllowed = 'move';
+			event.dataTransfer.setData('text/plain', questionId);
+		}
+	}
+
+	function dragOverQuestion(event: DragEvent, destination: number) {
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+		const questionId = draggedQuestionId || event.dataTransfer?.getData('text/plain') || '';
+		if (questionId) moveQuestionTo(questionId, destination);
 	}
 
 	function addQuestion() {
@@ -427,8 +456,8 @@
 					<div>
 						<h2 id="questions-heading">Bring the questions</h2>
 						<p>
-							Add up to {maxQuestions} questions by hand or import a spreadsheet. Use the arrows to set
-							the order.
+							Add up to {maxQuestions} questions by hand or import a spreadsheet. Drag to reorder, or
+							select a question and use its keyboard-accessible arrow controls.
 						</p>
 					</div>
 				</div>
@@ -463,9 +492,19 @@
 						{#each questions as question, index (question.client_id)}
 							<button
 								type="button"
+								draggable="true"
 								class="question-nav-item"
 								class:selected={question.client_id === selectedQuestionId}
 								aria-current={question.client_id === selectedQuestionId ? 'step' : undefined}
+								aria-label="Question {index + 1}: {question.prompt.trim() ||
+									'Untitled question'}. Drag to reorder."
+								ondragstart={(event) => startQuestionDrag(event, question.client_id ?? '')}
+								ondragover={(event) => dragOverQuestion(event, index)}
+								ondrop={(event) => {
+									event.preventDefault();
+									draggedQuestionId = '';
+								}}
+								ondragend={() => (draggedQuestionId = '')}
 								onclick={() => (selectedQuestionId = question.client_id ?? '')}
 							>
 								<span class="question-nav-number">{String(index + 1).padStart(2, '0')}</span>
@@ -775,8 +814,12 @@
 
 	.question-list {
 		display: grid;
+		max-height: min(65vh, 46rem);
+		overflow-y: auto;
 		align-content: start;
 		gap: 0.5rem;
+		overscroll-behavior: contain;
+		padding-right: 0.25rem;
 	}
 
 	.question-workspace {

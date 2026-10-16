@@ -13,7 +13,9 @@ module Api
         return render_not_found unless version
 
         room = GameRoom.create!(activity_version: version, host_user: current_user)
-        render json: { data: Activities::Serializers::GameRoomSerializer.call(room) }, status: :created
+        render json: {
+          data: Activities::Serializers::GameRoomSerializer.call(room, include_participant_keys: true)
+        }, status: :created
       rescue ActiveRecord::RecordInvalid => error
         render_validation_error(error.record)
       end
@@ -25,7 +27,13 @@ module Api
         participant = room.play_sessions.find_by(id: params[:session_id]) if params[:session_id].present?
         return render_not_found if params[:session_id].present? && !participant
 
-        render json: { data: Activities::Serializers::GameRoomSerializer.call(room, participant_session: participant) }
+        render json: {
+          data: Activities::Serializers::GameRoomSerializer.call(
+            room,
+            participant_session: participant,
+            include_participant_keys: room.host_user_id == current_user&.id
+          )
+        }
       end
 
       def join
@@ -84,7 +92,9 @@ module Api
         return unless room
 
         room = Assessments::Services::AdvanceGameRoom.start!(room: room)
-        render json: { data: Activities::Serializers::GameRoomSerializer.call(room) }
+        render json: {
+          data: Activities::Serializers::GameRoomSerializer.call(room, include_participant_keys: true)
+        }
       rescue Assessments::Services::AdvanceGameRoom::InvalidTransition
         render_room_transition_error
       end
@@ -93,8 +103,18 @@ module Api
         room = find_host_room
         return unless room
 
-        room = Assessments::Services::AdvanceGameRoom.next!(room: room)
-        render json: { data: Activities::Serializers::GameRoomSerializer.call(room) }
+        requested_index = params[:question_index]
+        question_index = if requested_index.nil?
+          nil
+        elsif requested_index.to_s.match?(/\A\d+\z/)
+          requested_index.to_i
+        else
+          raise Assessments::Services::AdvanceGameRoom::InvalidTransition
+        end
+        room = Assessments::Services::AdvanceGameRoom.next!(room: room, question_index: question_index)
+        render json: {
+          data: Activities::Serializers::GameRoomSerializer.call(room, include_participant_keys: true)
+        }
       rescue Assessments::Services::AdvanceGameRoom::InvalidTransition
         render_room_transition_error
       end

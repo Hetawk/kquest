@@ -57,12 +57,16 @@ export type AttemptResult = {
 	score: number;
 	max_score: number;
 	total_response_time_ms: number;
+	started_at: string | null;
+	completed_at: string;
+	duration_seconds: number | null;
 	results: QuestionResult[];
 };
 
 export type LeaderboardEntry = {
 	rank: number;
 	learner_name: string;
+	participant_key?: string;
 	score: number;
 	max_score: number | null;
 	response_time_ms: number;
@@ -83,6 +87,9 @@ export type GameRoom = {
 	question_count: number;
 	current_question: PlayQuestion | null;
 	question_started_at: string | null;
+	started_at: string | null;
+	ended_at: string | null;
+	duration_seconds: number | null;
 	time_remaining_seconds: number;
 	server_time: string;
 	participant_count: number;

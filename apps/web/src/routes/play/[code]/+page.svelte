@@ -247,6 +247,13 @@
 		gameAudio?.setEnabled(soundEnabled);
 	}
 
+	function formatDuration(seconds: number | null) {
+		if (seconds === null) return 'Not available';
+		const minutes = Math.floor(seconds / 60);
+		const remainder = seconds % 60;
+		return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+	}
+
 	const current = $derived(activity?.questions[currentQuestion]);
 	const questionExpired = $derived(Boolean(current?.time_limit_seconds && secondsRemaining === 0));
 	const percent = $derived(
@@ -285,6 +292,7 @@
 			<p class="result-intro">
 				Thanks for playing, {attempt.learner_name}. Every question is another chance to learn.
 			</p>
+			<p class="duration-summary">Time spent: {formatDuration(attempt.duration_seconds)}</p>
 			<div
 				class="score-display"
 				aria-label="Your score: {attempt.score} out of {attempt.max_score} points"
@@ -468,7 +476,7 @@
 					></span>
 				</div>
 			{:else}
-				<p class="untimed-label">No time limit</p>
+				<p class="untimed-label">No countdown in participant-paced play</p>
 			{/if}
 
 			<h1 id="question-heading" class="question-prompt">{current.prompt}</h1>

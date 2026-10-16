@@ -33,6 +33,7 @@
 	let bulkTimeLimit = $state('30');
 	let error = $state('');
 	let notice = $state('');
+	let draggedQuestionId = $state('');
 	let hasChanges = $derived(
 		originalTitle !== activityTitle || originalQuestions !== JSON.stringify(questions)
 	);
@@ -53,6 +54,7 @@
 				if (data.editMode) step = 'questions';
 				questions = activity.questions.map((question) => ({
 					...question,
+					time_limit_seconds: question.time_limit_seconds || 30,
 					options: question.options.map((option) => ({ ...option })),
 					correct_option_ids:
 						question.correct_option_ids.length > 0
@@ -78,6 +80,57 @@
 		const reordered = [...questions];
 		[reordered[index], reordered[target]] = [reordered[target], reordered[index]];
 		questions = reordered;
+	}
+
+	function moveQuestionTo(questionId: string, destination: number) {
+		const source = questions.findIndex((question) => question.id === questionId);
+		if (source < 0 || destination < 0 || destination >= questions.length || source === destination)
+			return;
+
+		const reordered = [...questions];
+		const [moved] = reordered.splice(source, 1);
+		if (!moved) return;
+		reordered.splice(destination, 0, moved);
+		questions = reordered;
+		notice = `Question moved to position ${destination + 1}.`;
+	}
+
+	function startQuestionDrag(event: DragEvent, questionId: string) {
+		draggedQuestionId = questionId;
+		if (event.dataTransfer) {
+			event.dataTransfer.effectAllowed = 'move';
+			event.dataTransfer.setData('text/plain', questionId);
+		}
+	}
+
+	function dragOverQuestion(event: DragEvent, questionId: string, destination: number) {
+		event.preventDefault();
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+		const draggedId = draggedQuestionId || event.dataTransfer?.getData('text/plain') || '';
+		if (draggedId && draggedId !== questionId) moveQuestionTo(draggedId, destination);
+	}
+
+	function finishQuestionDrag(event: DragEvent) {
+		event.preventDefault();
+		draggedQuestionId = '';
+	}
+
+	function jumpToQuestion(questionId: string) {
+		const container = document.getElementById('session-question-list');
+		const target = document.getElementById(`session-question-${questionId}`);
+		if (!container || !target) return;
+
+		const top = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+		container.scrollTo({
+			top: container.scrollTop + top,
+			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+		});
+	}
+
+	function formatDuration(seconds: number) {
+		const minutes = Math.floor(seconds / 60);
+		const remainder = seconds % 60;
+		return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
 	}
 
 	function updateQuestion(index: number, updated: QuestionDraft) {
@@ -111,12 +164,8 @@
 	function applyBulkTimeLimit() {
 		const rawTimeLimit = String(bulkTimeLimit).trim();
 		const timeLimit = Number(rawTimeLimit);
-		if (
-			rawTimeLimit === '' ||
-			!Number.isInteger(timeLimit) ||
-			(timeLimit !== 0 && (timeLimit < 5 || timeLimit > 300))
-		) {
-			error = 'Use 0 for untimed questions, or enter a time from 5 to 300 seconds.';
+		if (rawTimeLimit === '' || !Number.isInteger(timeLimit) || timeLimit < 5 || timeLimit > 300) {
+			error = 'Enter a live question timer from 5 to 300 seconds.';
 			return;
 		}
 		error = '';
@@ -328,68 +377,154 @@
 				<p class="section-copy">
 					{data.editMode
 						? 'Reorder, add, remove, and edit questions or import them from a spreadsheet. Your changes will create a new quest version.'
-						: 'Reorder questions, adjust answer choices and correct answers, or set timing for the whole quest or individual questions.'}
+						: 'Review every question before starting. Participant-paced play has no question countdown; instructor-paced play uses the live timers shown here.'}
 				</p>
-				<label class="title-field" for="quest-title">
-					<span>Quest title</span>
-					<input id="quest-title" type="text" maxlength="120" bind:value={activityTitle} required />
-				</label>
-				<div class="import-panel">
-					<div>
-						<strong>Import questions from a file</strong>
-						<p>Upload a CSV or Excel workbook (.xlsx), then review the imported questions here.</p>
-						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-						<a href={questionTemplateUrl} download>Download the CSV template</a>
-						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-						<a href={niaQuestionsUrl} download>Download NIA example questions (40)</a>
-					</div>
-					<label class="button button-outline import-button" for="revision-question-import">
-						{importing ? 'Reading file…' : 'Import CSV / XLSX'}
-					</label>
-					<input
-						id="revision-question-import"
-						class="visually-hidden"
-						type="file"
-						accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-						onchange={handleQuestionsImported}
-						disabled={importing || saving || starting}
-					/>
-				</div>
-				<div class="bulk-timing">
-					<div>
-						<strong>Set time for every question</strong>
-						<p>Apply one time limit to the whole quest. Enter 0 for no time limit.</p>
-					</div>
-					<label>
-						<span class="visually-hidden">Time limit for every question in seconds</span>
+				{#if data.editMode}
+					<label class="title-field" for="quest-title">
+						<span>Quest title</span>
 						<input
-							class="bulk-time-input"
-							type="number"
-							min="0"
-							max="300"
-							step="1"
-							bind:value={bulkTimeLimit}
-							aria-label="Time limit for every question in seconds"
+							id="quest-title"
+							type="text"
+							maxlength="120"
+							bind:value={activityTitle}
+							required
 						/>
-						<span>seconds</span>
 					</label>
-					<button class="button button-outline" type="button" onclick={applyBulkTimeLimit}>
-						Update all
-					</button>
-				</div>
-				<div class="question-list">
-					{#each questions as question, index (question.id)}
-						<QuestionEditor
-							{question}
-							{index}
-							onUpdate={(updated) => updateQuestion(index, updated)}
-							onRemove={() => removeQuestion(index)}
-							onMoveUp={() => moveQuestion(index, -1)}
-							onMoveDown={() => moveQuestion(index, 1)}
-							canMoveUp={index > 0}
-							canMoveDown={index < questions.length - 1}
-							canRemove={true}
+					<div class="import-panel">
+						<div>
+							<strong>Import questions from a file</strong>
+							<p>
+								Upload a CSV or Excel workbook (.xlsx), then review the imported questions here.
+							</p>
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a href={questionTemplateUrl} download>Download the CSV template</a>
+							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+							<a href={niaQuestionsUrl} download>Download NIA example questions (40)</a>
+						</div>
+						<label class="button button-outline import-button" for="revision-question-import">
+							{importing ? 'Reading file…' : 'Import CSV / XLSX'}
+						</label>
+						<input
+							id="revision-question-import"
+							class="visually-hidden"
+							type="file"
+							accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+							onchange={handleQuestionsImported}
+							disabled={importing || saving || starting}
 						/>
+					</div>
+					<div class="bulk-timing">
+						<div>
+							<strong>Set time for every question</strong>
+							<p>
+								Apply one live timer to the whole quest. Participant-paced play remains untimed.
+							</p>
+						</div>
+						<label>
+							<span class="visually-hidden">Live timer for every question in seconds</span>
+							<input
+								class="bulk-time-input"
+								type="number"
+								min="5"
+								max="300"
+								step="1"
+								bind:value={bulkTimeLimit}
+								aria-label="Live timer for every question in seconds"
+							/>
+							<span>seconds</span>
+						</label>
+						<button class="button button-outline" type="button" onclick={applyBulkTimeLimit}>
+							Update all
+						</button>
+					</div>
+				{:else}
+					<div class="review-summary">
+						<div>
+							<strong>Instructor-paced live timers</strong>
+							<span>
+								{formatDuration(
+									questions.reduce((total, question) => total + question.time_limit_seconds, 0)
+								)}
+								maximum shared countdown time
+							</span>
+						</div>
+						<div>
+							<strong>Participant-paced</strong>
+							<span>No question countdown; each learner progresses independently.</span>
+						</div>
+					</div>
+					{#if !data.editMode}
+						<div class="step-actions review-top-actions">
+							<button class="button button-outline" type="button" onclick={() => (step = 'mode')}
+								>← Back</button
+							>
+							<button
+								class="button button-primary"
+								type="button"
+								onclick={() => (step = 'settings')}
+							>
+								Continue to settings <span aria-hidden="true">→</span>
+							</button>
+						</div>
+					{/if}
+				{/if}
+				<nav class="question-jump-nav" aria-label="Jump to a question">
+					{#each questions as question, index (question.id)}
+						<button
+							type="button"
+							aria-label="Go to question {index + 1}"
+							onclick={() => jumpToQuestion(question.id)}
+						>
+							{index + 1}
+						</button>
+					{/each}
+				</nav>
+				<div
+					class="question-list"
+					class:read-only-list={!data.editMode}
+					id="session-question-list"
+					aria-label={data.editMode ? 'Editable quest questions' : 'Read-only question review'}
+				>
+					{#each questions as question, index (question.id)}
+						<div id={`session-question-${question.id}`} class="question-list-item">
+							{#if data.editMode}
+								<QuestionEditor
+									{question}
+									{index}
+									onUpdate={(updated) => updateQuestion(index, updated)}
+									onRemove={() => removeQuestion(index)}
+									onMoveUp={() => moveQuestion(index, -1)}
+									onMoveDown={() => moveQuestion(index, 1)}
+									onDragStart={(event) => startQuestionDrag(event, question.id)}
+									onDragOver={(event) => dragOverQuestion(event, question.id, index)}
+									onDrop={finishQuestionDrag}
+									onDragEnd={() => (draggedQuestionId = '')}
+									canMoveUp={index > 0}
+									canMoveDown={index < questions.length - 1}
+									canRemove={true}
+								/>
+							{:else}
+								<article class="question-review-card">
+									<div class="review-question-heading">
+										<span>QUESTION {String(index + 1).padStart(2, '0')}</span>
+										<strong
+											>{question.points} pts · {question.time_limit_seconds}s live timer</strong
+										>
+									</div>
+									<h3>{question.prompt}</h3>
+									<ul>
+										{#each question.options as option, optionIndex (option.id)}
+											<li class:correct={question.correct_option_ids.includes(option.id)}>
+												<span>{String.fromCharCode(65 + optionIndex)}. {option.text}</span>
+												{#if question.correct_option_ids.includes(option.id)}
+													<strong>Correct answer</strong>
+												{/if}
+											</li>
+										{/each}
+									</ul>
+								</article>
+							{/if}
+						</div>
 					{/each}
 					{#if questions.length === 0}
 						<div class="empty-questions">
@@ -398,18 +533,20 @@
 						</div>
 					{/if}
 				</div>
-				<button
-					class="button button-outline add-question"
-					type="button"
-					onclick={addQuestion}
-					disabled={questions.length >= 100 || importing || saving || starting}
-				>
-					+ Add a question
-				</button>
-				<p class="revision-note">
-					Saving creates a new quest version. Existing learners and previously shared links keep the
-					version they already use.
-				</p>
+				{#if data.editMode}
+					<button
+						class="button button-outline add-question"
+						type="button"
+						onclick={addQuestion}
+						disabled={questions.length >= 100 || importing || saving || starting}
+					>
+						+ Add a question
+					</button>
+					<p class="revision-note">
+						Saving creates a new quest version. Existing learners and previously shared links keep
+						the version they already use.
+					</p>
+				{/if}
 				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
 				{#if notice}<p class="success-message" role="status">{notice}</p>{/if}
 				<div class="step-actions">
@@ -423,15 +560,16 @@
 							>← Back</button
 						>
 					{/if}
-					<button
-						class="button button-outline"
-						type="button"
-						onclick={saveRevision}
-						disabled={!hasChanges || saving || starting || importing}
-					>
-						{saving ? 'Saving…' : 'Update quest'}
-					</button>
-					{#if !data.editMode}
+					{#if data.editMode}
+						<button
+							class="button button-outline"
+							type="button"
+							onclick={saveRevision}
+							disabled={!hasChanges || saving || starting || importing}
+						>
+							{saving ? 'Saving…' : 'Update quest'}
+						</button>
+					{:else}
 						<button class="button button-primary" type="button" onclick={() => (step = 'settings')}>
 							Continue <span aria-hidden="true">→</span>
 						</button>
@@ -462,14 +600,11 @@
 							<span class="setting-icon" aria-hidden="true">◷</span>
 							<span
 								><strong>Question timing</strong><small
-									>Uses the time limits already set for this published quest.</small
+									>A shared countdown uses each question’s live timer; you control group
+									progression.</small
 								></span
 							>
-							<b
-								>{questions.some((question) => question.time_limit_seconds > 0)
-									? 'As set'
-									: 'Untimed'}</b
-							>
+							<b>Timed</b>
 						</div>
 						<div class="setting-row">
 							<span class="setting-icon" aria-hidden="true">↗</span>
@@ -494,14 +629,10 @@
 							<span class="setting-icon" aria-hidden="true">◷</span>
 							<span
 								><strong>Question timing</strong><small
-									>Uses the time limits already set for this published quest.</small
+									>No question countdown; learners work at their own pace.</small
 								></span
 							>
-							<b
-								>{questions.some((question) => question.time_limit_seconds > 0)
-									? 'As set'
-									: 'Untimed'}</b
-							>
+							<b>No countdown</b>
 						</div>
 						<div class="setting-row">
 							<span class="setting-icon" aria-hidden="true">◎</span>
@@ -794,7 +925,132 @@
 	}
 	.question-list {
 		display: grid;
+		max-height: min(62vh, 50rem);
+		overflow-y: auto;
 		gap: 1rem;
+		overscroll-behavior: contain;
+		padding: 0.25rem 0.25rem 0.25rem 0;
+		scroll-behavior: smooth;
+	}
+	.question-list.read-only-list {
+		gap: 0.75rem;
+	}
+	.question-list-item {
+		scroll-margin-block: 0.5rem;
+	}
+	.question-jump-nav {
+		position: sticky;
+		z-index: 2;
+		top: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		max-height: 5.8rem;
+		overflow: auto;
+		margin: 1rem 0 0.7rem;
+		padding: 0.5rem;
+		border: 1px solid var(--line);
+		border-radius: 0.7rem;
+		background: rgb(255 255 255 / 96%);
+		box-shadow: 0 4px 12px rgb(31 28 24 / 5%);
+	}
+	.question-jump-nav button {
+		min-width: 2rem;
+		min-height: 2rem;
+		padding: 0.25rem;
+		border: 1px solid var(--line);
+		border-radius: 0.45rem;
+		background: white;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.72rem;
+		font-weight: 750;
+		cursor: pointer;
+	}
+	.question-jump-nav button:hover,
+	.question-jump-nav button:focus-visible {
+		border-color: var(--gold-deep);
+		background: #fffaf0;
+	}
+	.review-summary {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+		margin: 1rem 0;
+	}
+	.review-summary > div {
+		display: grid;
+		gap: 0.3rem;
+		padding: 0.9rem;
+		border: 1px solid var(--line);
+		border-radius: 0.75rem;
+		background: #fbfaf8;
+	}
+	.review-summary strong,
+	.review-question-heading strong {
+		color: var(--navy);
+		font-size: 0.78rem;
+	}
+	.review-summary span {
+		color: var(--ink-muted);
+		font-size: 0.72rem;
+		line-height: 1.5;
+	}
+	.review-top-actions {
+		justify-content: flex-end;
+		margin-block: 1rem;
+	}
+	.question-review-card {
+		padding: clamp(1rem, 2.5vw, 1.4rem);
+		border: 1px solid var(--line);
+		border-radius: 0.9rem;
+		background: #fff;
+	}
+	.review-question-heading {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		color: var(--ink-muted);
+		font-size: 0.66rem;
+		font-weight: 800;
+	}
+	.review-question-heading > span {
+		letter-spacing: 0.1em;
+	}
+	.question-review-card h3 {
+		margin: 0.7rem 0;
+		color: var(--navy);
+		font-size: 1rem;
+		line-height: 1.4;
+	}
+	.question-review-card ul {
+		display: grid;
+		gap: 0.35rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.question-review-card li {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.55rem 0.65rem;
+		border: 1px solid #ece9e2;
+		border-radius: 0.5rem;
+		color: var(--ink);
+		font-size: 0.77rem;
+	}
+	.question-review-card li.correct {
+		border-color: #b9d8c5;
+		background: #f3faf5;
+	}
+	.question-review-card li strong {
+		flex: 0 0 auto;
+		color: #226644;
+		font-size: 0.67rem;
+	}
+	.review-top-actions .button {
+		min-width: 10rem;
 	}
 	.empty-questions {
 		padding: 1.2rem;
@@ -916,6 +1172,16 @@
 		}
 		.mode-card {
 			min-height: auto;
+		}
+		.review-summary {
+			grid-template-columns: 1fr;
+		}
+		.review-top-actions .button {
+			min-width: 0;
+		}
+		.review-question-heading {
+			align-items: flex-start;
+			flex-direction: column;
 		}
 		.setting-row {
 			grid-template-columns: auto minmax(0, 1fr);

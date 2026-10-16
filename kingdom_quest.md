@@ -895,15 +895,16 @@ Each type should declare its own definition schema, response schema, evaluation 
 
 ### Per-question timing
 
-- New questions default to 30 seconds. Educators may set an individual limit from 5 to 300 seconds or turn the timer off (`0`) for that question.
+- New questions default to 30 seconds. Educators may set an individual limit from 5 to 300 seconds. Questions do not support a zero-second or disabled timer in live play.
 - The published activity version freezes each question's time limit, so later changes cannot alter an active or already-published quest.
 - In session setup, hosts can edit the quest title, review and reorder the full question list, edit question content and answer keys, add or remove answer choices (2–6 per question), set a per-question limit, or apply one limit to every question. New questions start with four answer choices and one point. Saving or starting with unsaved edits creates a new immutable version before play begins; the new version uses a new share code while older codes continue to resolve to their original versions.
-- The API starts a play session and records each response in question order. The server decides whether the deadline has elapsed; a browser countdown is only a display.
-- A timed-out question is recorded as unanswered, earns zero points, and advances to the next question. A late answer cannot override the timeout.
+- Participant-paced practice is untimed: configured per-question timers do not create deadlines, countdowns, or speed bonuses in this mode. Live instructor-paced rooms always use positive per-question timers, with 30 seconds as the fallback for legacy questions.
+- The API starts a play session and records each response in question order. The server decides whether a live deadline has elapsed; a browser countdown is only a display.
+- A timed-out live question is recorded as unanswered, earns zero points, and advances only when the host advances the group. A late answer cannot override the timeout.
 - The client retries session and answer requests with idempotency keys. A completed answer cannot be changed or submitted twice.
 - Immediate feedback may identify whether the submitted answer was correct, but the response does not expose answer identifiers for unanswered questions. Final answer visibility follows the activity's result policy.
-- Sessions expire after one hour; expired session records are purged after a short retry/retention window.
-- The untimed setting is required as an accessibility alternative to fixed deadlines. Any future timed mode must preserve a way to turn off or adjust its limit.
+- Participant-paced sessions remain valid for up to 30 days; active live-room sessions use their shorter room validity window. Cleanup must respect the configured retry and retention policy.
+- Participant-paced play is the untimed accessibility alternative. Instructor-paced live questions must remain timed, and the host may adjust question timers before starting the room.
 
 New types should be addable without rewriting the assessment workflow. Some question types, especially essay and code response, require dedicated grading or sandboxing capabilities and should not be treated as simple extensions of multiple-choice scoring.
 
@@ -944,13 +945,15 @@ KINGDOM Quest supports two distinct group-play modes, selected by the host when 
 - **Participant-paced:** Each learner starts and completes an independent attempt. Scores feed a shared provisional leaderboard as participants finish; the leaderboard is not presented as final while the activity remains open.
 - **Host-paced live room:** A host creates a room with its own join code and direct link. Participants join the waiting room as guests or signed-in users. The host starts the room and controls each question transition and the end of the game. Every participant sees the same question index and server start time.
 
-Live-room participant answers are recorded independently against the shared round deadline. Advancing a round records zero for any participant who has not answered, then starts the next question for all participants. The host must be authorized as the room owner for state-changing host commands. Guest participants receive unguessable session identifiers; room codes are for joining, not authorization. Production release requires abuse controls, retention policy, authenticated host roles, and real-time delivery/authorization review.
+Live-room participant answers are recorded independently against the shared round deadline. Advancing a round records zero for any participant who has not answered, then starts the next question for all participants. Hosts may select any question while a room is active. Returning to a question retains its original start time and deadline; answers already submitted for that question remain locked and cannot be rescored. Questions left unanswered receive zero when the host ends the game. The host must be authorized as the room owner for state-changing host commands. Guest participants receive unguessable session identifiers; room codes are for joining, not authorization. Production release requires abuse controls, retention policy, authenticated host roles, and real-time delivery/authorization review.
+
+During live play, hosts see a prominent per-question countdown that changes urgency styling and plays progressively stronger, user-controllable audio cues during the final ten seconds. The live host view must not imply a single overall quiz-progress percentage from the current-round answer count. A selectable question navigator supports host-controlled review and reopening. The standings panel updates as answers are recorded, shows each learner's current score and rank, and indicates movement relative to the start of the current round; the final screen presents the completed podium and standings. Participants see a large mobile-friendly countdown and can control countdown audio. Full-screen host controls are available where the browser supports them. Waiting-room ambient audio is optional, user-controllable, and must not block joining or gameplay.
 
 The default speed policy is proportional and server-authoritative:
 
 `award = base_points + round(speed_bonus_points * clamp(1 - elapsed_seconds / time_limit_seconds, 0, 1))`
 
-This applies only to correct answers on timed questions when speed scoring is enabled. Each question has a base-point value and an independent maximum speed-bonus value (default 100); the bonus falls linearly from its configured maximum at the start of the timer to zero at the deadline. Equal server-measured response times receive equal bonuses. Untimed questions award base points only; incorrect and timed-out answers award zero. The server measures elapsed time and calculates the score; clients cannot submit a claimed score or response time. Educators can disable speed scoring. The displayed maximum is base points plus the configured speed bonus when the question is timed and speed scoring is enabled.
+This applies only to correct live answers on timed questions when speed scoring is enabled. Each question has a base-point value and an independent maximum speed-bonus value (default 100); the bonus falls linearly from its configured maximum at the start of the timer to zero at the deadline. Equal server-measured response times receive equal bonuses. Participant-paced answers award base points only; incorrect and timed-out live answers award zero. The server measures elapsed time and calculates the score; clients cannot submit a claimed score or response time. Educators can disable speed scoring. The displayed maximum is base points plus the configured speed bonus when the question is timed and speed scoring is enabled.
 
 Rankings sort by total points descending, then cumulative server-recorded answer time ascending, then display name as a stable final tie-break. Completed participant-paced attempts contribute to a provisional leaderboard. Host-paced room standings include current persisted scores and become final only after the host ends the last round. Results show the top three in a visual podium, with first place centered; rankings remain available below the podium. A ranking is not a substitute for reporting correctness and learning progress.
 
@@ -1309,10 +1312,10 @@ Animations must never be the only way to communicate correctness, urgency, or st
 - Follow WCAG 2.2 AA as the baseline.
 - Support keyboard-only use and screen readers.
 - Respect `prefers-reduced-motion`.
-- Make per-question countdowns visible and understandable without announcing every second to screen readers; offer untimed questions.
-- Start audio only after the learner explicitly starts a quest, expose an immediate sound on/off control, and keep all correctness feedback available visually.
+- Make live per-question countdowns prominent and understandable without announcing every second to screen readers. Participant-paced practice remains untimed.
+- Waiting-room audio is optional and user-controllable on both host and participant screens. Live countdown audio is user-controllable, grows more urgent through the final ten seconds, and keeps all timing and correctness information available visually.
 - Stop or fade ambient audio when a quest ends or the player leaves. Audio load failures must not prevent gameplay.
-- Use original, locally generated audio cues. Keep the ambient pad quiet, ticks restrained to the final five seconds, the correct-answer chord warm, and the incorrect-answer cue soft.
+- Use original, locally generated audio cues. Keep the waiting ambient pad quiet, progressively increase countdown ticks and ambient urgency during the final ten seconds, the correct-answer chord warm, and the incorrect-answer cue soft.
 - Keep question rendering lightweight.
 - Lazy-load large media.
 - Avoid unnecessary JavaScript in the learner player.

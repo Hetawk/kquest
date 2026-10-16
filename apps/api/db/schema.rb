@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000010) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000011) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -58,6 +58,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000010) do
     t.datetime "updated_at", null: false
     t.integer "total_response_time_ms", default: 0, null: false
     t.uuid "game_room_id"
+    t.datetime "started_at"
     t.index ["activity_version_id", "game_room_id", "score", "total_response_time_ms"], name: "index_attempts_on_leaderboard"
     t.index ["activity_version_id", "submitted_at"], name: "index_attempts_on_activity_version_id_and_submitted_at"
     t.index ["activity_version_id"], name: "index_attempts_on_activity_version_id"
@@ -94,6 +95,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000010) do
     t.datetime "ended_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "started_at"
+    t.jsonb "question_start_times", default: {}, null: false
     t.index ["activity_version_id"], name: "index_game_rooms_on_activity_version_id"
     t.index ["host_user_id"], name: "index_game_rooms_on_host_user_id"
     t.index ["room_code"], name: "index_game_rooms_on_room_code", unique: true
@@ -145,6 +148,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000010) do
     t.check_constraint "points >= 1 AND points <= 1000", name: "questions_points_valid"
     t.check_constraint "speed_bonus_points >= 0 AND speed_bonus_points <= 100000", name: "questions_speed_bonus_points_valid"
     t.check_constraint "time_limit_seconds = 0 OR time_limit_seconds >= 5 AND time_limit_seconds <= 300", name: "questions_time_limit_valid"
+    t.check_constraint "time_limit_seconds >= 5 AND time_limit_seconds <= 300", name: "questions_time_limit_seconds_valid"
   end
 
   create_table "uploaded_assets", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|

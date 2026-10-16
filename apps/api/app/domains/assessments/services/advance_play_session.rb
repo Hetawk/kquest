@@ -38,10 +38,9 @@ module Assessments
           question = snapshots[session.current_question_index]
           raise InvalidAnswer unless question && question.fetch("id") == question_id
 
-          time_limit = question.fetch("time_limit_seconds", Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS)
           now = Time.current
           elapsed_seconds = [ now - session.question_started_at, 0 ].max
-          timed_out = time_limit.positive? && elapsed_seconds >= time_limit
+          timed_out = false
           if multiple_select
             raise InvalidAnswer unless option_id.nil? && option_ids.is_a?(Array)
             raise InvalidAnswer unless selected_option_ids.all? { |id| id.is_a?(String) }
@@ -62,17 +61,21 @@ module Assessments
           recorded_option_ids = timed_out ? [] : selected_option_ids
           answered = multiple_select ? recorded_option_ids.any? : recorded_option_id.present?
           award = if answered && multiple_select
-            Questions::Types::MultipleSelect.score_with_speed(
-              question: question,
-              selected_option_ids: recorded_option_ids,
-              elapsed_seconds: elapsed_seconds
-            )
+            {
+              points_awarded: Questions::Types::MultipleSelect.score(
+                question: question,
+                selected_option_ids: recorded_option_ids
+              ),
+              speed_bonus: 0
+            }
           elsif answered
-            Questions::Types::SingleChoice.score_with_speed(
-              question: question,
-              selected_option_id: recorded_option_id,
-              elapsed_seconds: elapsed_seconds
-            )
+            {
+              points_awarded: Questions::Types::SingleChoice.score(
+                question: question,
+                selected_option_id: recorded_option_id
+              ),
+              speed_bonus: 0
+            }
           else
             { points_awarded: 0, speed_bonus: 0 }
           end
@@ -96,7 +99,8 @@ module Assessments
               activity_version: session.activity_version,
               learner_name: session.learner_name,
               responses: responses,
-              submission_key: session.submission_key
+              submission_key: session.submission_key,
+              started_at: session.created_at
             )
             result = {
               "complete" => true,
@@ -116,11 +120,6 @@ module Assessments
             )
           else
             next_index = session.current_question_index + 1
-            next_question = snapshots.fetch(next_index)
-            next_limit = next_question.fetch(
-              "time_limit_seconds",
-              Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS
-            )
             result = {
               "complete" => false,
               "is_correct" => is_correct,
@@ -128,7 +127,7 @@ module Assessments
               "points_awarded" => award.fetch(:points_awarded),
               "speed_bonus" => award.fetch(:speed_bonus),
               "question_index" => next_index,
-              "time_limit_seconds" => next_limit,
+              "time_limit_seconds" => 0,
               "question_started_at" => now.iso8601(6),
               "server_time" => now.iso8601(6)
             }

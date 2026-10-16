@@ -29,6 +29,15 @@
 	let answerKey = '';
 	let answeredLocally = $state(false);
 	let timeoutSent = $state(false);
+	let soundEnabled = $state(true);
+	let soundNeedsGesture = $state(false);
+	let audioUnavailable = $state(false);
+	let waitingAudio: import('#lib/features/audio/WaitingRoomAudio.js').WaitingRoomAudio | null =
+		null;
+	let liveAudio: import('#lib/features/audio/GameAudio.js').GameAudio | null = null;
+	let lastAudioQuestionIndex = -1;
+	let lastTickSecond = -1;
+	let lastUrgencySecond = -1;
 
 	onMount(() => {
 		let disposed = false;
@@ -80,6 +89,33 @@
 
 		void refresh();
 		const poll = window.setInterval(() => void refresh(), 1000);
+		void import('#lib/features/audio/WaitingRoomAudio.js')
+			.then(({ WaitingRoomAudio }) => {
+				if (disposed) return;
+				waitingAudio = new WaitingRoomAudio(
+					() => (audioUnavailable = true),
+					() => (soundNeedsGesture = true),
+					() => (soundNeedsGesture = false)
+				);
+				if (room?.status === 'waiting' && sessionId) waitingAudio.start();
+			})
+			.catch(() => {
+				audioUnavailable = true;
+			});
+		void import('#lib/features/audio/GameAudio.js')
+			.then(({ GameAudio }) => {
+				if (disposed) return;
+				liveAudio = new GameAudio(
+					() => (audioUnavailable = true),
+					() => (soundNeedsGesture = true),
+					() => (soundNeedsGesture = false)
+				);
+				if (!soundEnabled) liveAudio.setEnabled(false);
+				if (room?.status === 'active') liveAudio.start();
+			})
+			.catch(() => {
+				audioUnavailable = true;
+			});
 		const clock = window.setInterval(() => {
 			if (
 				!room?.current_question?.time_limit_seconds ||
@@ -97,7 +133,39 @@
 			disposed = true;
 			window.clearInterval(poll);
 			window.clearInterval(clock);
+			waitingAudio?.dispose();
+			waitingAudio = null;
+			liveAudio?.dispose();
+			liveAudio = null;
 		};
+	});
+
+	$effect(() => {
+		const currentRoom = room;
+		if (currentRoom?.status === 'waiting' && sessionId) waitingAudio?.start();
+		else waitingAudio?.stop();
+
+		if (currentRoom?.status !== 'active' || !currentRoom.current_question) {
+			liveAudio?.stopAmbient();
+			return;
+		}
+
+		liveAudio?.start();
+		if (lastAudioQuestionIndex !== currentRoom.question_index) {
+			lastAudioQuestionIndex = currentRoom.question_index;
+			lastTickSecond = -1;
+			lastUrgencySecond = -1;
+		}
+		const seconds = Math.ceil(remaining);
+		if (seconds !== lastUrgencySecond) {
+			lastUrgencySecond = seconds;
+			const urgency = Math.max(0, Math.min((11 - seconds) / 10, 1));
+			liveAudio?.setTimerUrgency(urgency);
+			if (seconds > 0 && seconds <= 10 && seconds !== lastTickSecond) {
+				lastTickSecond = seconds;
+				liveAudio?.playTick(urgency);
+			}
+		}
 	});
 
 	async function join(event: SubmitEvent) {
@@ -174,6 +242,17 @@
 		} finally {
 			submitting = false;
 		}
+	}
+
+	function toggleWaitingSound() {
+		if (soundNeedsGesture) {
+			waitingAudio?.start();
+			liveAudio?.start();
+			return;
+		}
+		soundEnabled = !soundEnabled;
+		waitingAudio?.setEnabled(soundEnabled);
+		liveAudio?.setEnabled(soundEnabled);
 	}
 
 	const questionExpired = $derived(
@@ -285,23 +364,63 @@
 					<h2>You’re in!</h2>
 					<p>Waiting for the host to start. You can still change your display name.</p>
 					<strong>{room.participant_count} players joined</strong>
+					<button
+						class="waiting-sound-button"
+						type="button"
+						aria-pressed={soundEnabled && !soundNeedsGesture}
+						disabled={audioUnavailable}
+						onclick={toggleWaitingSound}
+					>
+						{audioUnavailable
+							? 'Waiting sound unavailable'
+							: soundNeedsGesture
+								? 'Enable waiting sound'
+								: `Waiting sound ${soundEnabled ? 'on' : 'off'}`}
+					</button>
+					{#if audioUnavailable}
+						<p class="sound-note" role="status">
+							The sound could not be loaded; the game remains available.
+						</p>
+					{:else if soundNeedsGesture}
+						<p class="sound-note" role="status">
+							Your browser needs a tap before it can play sound.
+						</p>
+					{/if}
 				</div>
 			{:else if room.current_question}
 				<div class="question-meta">
 					<span>QUESTION {room.question_index + 1} OF {room.question_count}</span><span
 						>{room.answered_count}/{room.participant_count} answered</span
 					>
+					<button
+						class="waiting-sound-button"
+						type="button"
+						aria-pressed={soundEnabled && !soundNeedsGesture}
+						disabled={audioUnavailable}
+						onclick={toggleWaitingSound}
+					>
+						{audioUnavailable
+							? 'Sound unavailable'
+							: soundNeedsGesture
+								? 'Enable sound'
+								: `Sound ${soundEnabled ? 'on' : 'off'}`}
+					</button>
 				</div>
-				{#if room.current_question.time_limit_seconds > 0}
-					<div class="round-clock" class:clock-low={remaining <= 5}>
-						<strong>{Math.ceil(remaining)}</strong><span>seconds</span>
-					</div>
-					<div class="clock-track">
-						<span
-							style={`width:${Math.min(100, (remaining / room.current_question.time_limit_seconds) * 100)}%`}
-						></span>
-					</div>
-				{:else}<p class="untimed">Your host will move the group on when ready.</p>{/if}
+				<div
+					class="round-clock"
+					class:clock-warning={remaining <= 10}
+					class:clock-low={remaining <= 5}
+					role="timer"
+					aria-live="off"
+					aria-label="{Math.ceil(remaining)} seconds remaining"
+				>
+					<strong>{Math.ceil(remaining)}</strong><span>seconds</span>
+				</div>
+				<div class="clock-track">
+					<span
+						style={`width:${Math.min(100, (remaining / room.current_question.time_limit_seconds) * 100)}%`}
+					></span>
+				</div>
 				<h2 class="question-prompt">{room.current_question.prompt}</h2>
 				<fieldset class="answer-list" disabled={submitting || answeredLocally || questionExpired}>
 					<legend>
@@ -492,38 +611,86 @@
 		color: var(--ink-muted);
 		font-size: 0.8rem;
 	}
+	.waiting-sound-button {
+		margin-top: 0.8rem;
+		padding: 0.65rem 0.9rem;
+		border: 1px solid var(--line);
+		border-radius: 0.65rem;
+		background: white;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.75rem;
+		font-weight: 750;
+		cursor: pointer;
+	}
+	.waiting-sound-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
+	}
+	.waiting-state .sound-note {
+		margin: 0.5rem 0 0;
+		font-size: 0.7rem;
+	}
 	.question-meta {
 		display: flex;
+		align-items: center;
 		justify-content: space-between;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 		margin-top: 1.5rem;
 		color: var(--ink-muted);
 		font-size: 0.68rem;
 		font-weight: 800;
 	}
+	.question-meta .waiting-sound-button {
+		margin-top: 0;
+		margin-left: auto;
+	}
 	.round-clock {
 		display: grid;
-		width: 5rem;
-		height: 5rem;
+		width: clamp(8rem, 35vw, 11rem);
+		height: clamp(8rem, 35vw, 11rem);
 		place-content: center;
-		margin: 1.2rem auto 0.8rem;
-		border: 3px solid #e5d4ad;
-		border-radius: 50%;
+		margin: 1.4rem auto 1rem;
+		border: 4px solid #e5d4ad;
+		border-radius: 2rem;
+		background: #fffaf0;
 		color: var(--navy);
 		text-align: center;
+		box-shadow: 0 0.5rem 1.4rem #142a4310;
+		transition:
+			border-color 200ms ease,
+			background-color 200ms ease,
+			color 200ms ease,
+			transform 200ms ease;
 	}
 	.round-clock strong {
-		font-size: 1.6rem;
+		font-size: clamp(3.2rem, 12vw, 5rem);
 		line-height: 1;
+		font-variant-numeric: tabular-nums;
 	}
 	.round-clock span {
 		margin-top: 0.2rem;
 		color: var(--ink-muted);
-		font-size: 0.58rem;
+		font-size: 0.78rem;
+		font-weight: 750;
+	}
+	.clock-warning {
+		border-color: #df9c48;
+		background: #fff4e2;
+		color: #9a5c13;
 	}
 	.clock-low {
 		border-color: #bd6752;
+		background: #fff0ec;
 		color: #9a3f2d;
+		animation: timer-pulse 750ms ease-in-out infinite alternate;
+	}
+	@keyframes timer-pulse {
+		to {
+			transform: scale(1.035);
+			box-shadow: 0 0 1.5rem #bd67524d;
+		}
 	}
 	.clock-track {
 		height: 0.45rem;
@@ -537,10 +704,8 @@
 		background: var(--gold-deep);
 		transition: width 150ms linear;
 	}
-	.untimed {
-		color: var(--ink-muted);
-		font-size: 0.75rem;
-		text-align: center;
+	.clock-low + .clock-track span {
+		background: #bd6752;
 	}
 	.question-prompt {
 		margin: 1.4rem 0;
@@ -636,5 +801,10 @@
 	.standing-row span {
 		color: var(--gold-deep);
 		font-weight: 800;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.clock-low {
+			animation: none;
+		}
 	}
 </style>

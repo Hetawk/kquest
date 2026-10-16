@@ -15,7 +15,24 @@
 	let notice = $state('');
 	let copied = $state<'code' | 'link' | ''>('');
 	let qrDataUrl = $state('');
+	let hostPage = $state<HTMLElement | null>(null);
+	let isFullscreen = $state(false);
+	let soundEnabled = $state(true);
+	let soundNeedsGesture = $state(false);
+	let audioUnavailable = $state(false);
+	let waitingAudio: import('#lib/features/audio/WaitingRoomAudio.js').WaitingRoomAudio | null =
+		null;
+	let liveAudio: import('#lib/features/audio/GameAudio.js').GameAudio | null = null;
+	let remaining = $state(0);
+	let deadlineAt = 0;
+	let lastAudioQuestionIndex = -1;
+	let lastTickSecond = -1;
+	let lastUrgencySecond = -1;
+	let roundStartRanks = $state<Record<string, number>>({});
 	const roomCode = $derived(data.code.toUpperCase());
+	const questionNumbers = $derived(
+		room ? Array.from({ length: room.question_count }, (_, index) => index) : []
+	);
 	const joinLink = $derived(
 		typeof window === 'undefined' ? '' : createJoinLink(window.location.origin, roomCode)
 	);
@@ -30,14 +47,19 @@
 	onMount(() => {
 		let disposed = false;
 		let refreshing = false;
+		const updateFullscreenState = () => {
+			isFullscreen = document.fullscreenElement === hostPage;
+		};
+		document.addEventListener('fullscreenchange', updateFullscreenState);
 
 		const refresh = async () => {
 			if (refreshing || document.visibilityState === 'hidden') return;
 			refreshing = true;
+			const requestStartedAt = performance.now();
 			try {
 				const updated = await fetchGameRoom(roomCode);
 				if (!disposed) {
-					room = updated;
+					updateRoom(updated, requestStartedAt);
 					error = '';
 				}
 			} catch (cause) {
@@ -52,10 +74,78 @@
 
 		void refresh();
 		const timer = window.setInterval(() => void refresh(), 1800);
+		void import('#lib/features/audio/WaitingRoomAudio.js')
+			.then(({ WaitingRoomAudio }) => {
+				if (disposed) return;
+				waitingAudio = new WaitingRoomAudio(
+					() => (audioUnavailable = true),
+					() => (soundNeedsGesture = true),
+					() => (soundNeedsGesture = false)
+				);
+				if (room?.status === 'waiting') waitingAudio.start();
+			})
+			.catch(() => {
+				audioUnavailable = true;
+			});
+		void import('#lib/features/audio/GameAudio.js')
+			.then(({ GameAudio }) => {
+				if (disposed) return;
+				liveAudio = new GameAudio(
+					() => (audioUnavailable = true),
+					() => (soundNeedsGesture = true),
+					() => (soundNeedsGesture = false)
+				);
+				if (!soundEnabled) liveAudio.setEnabled(false);
+				if (room?.status === 'active') liveAudio.start();
+			})
+			.catch(() => {
+				audioUnavailable = true;
+			});
+		const clock = window.setInterval(() => {
+			if (room?.status !== 'active' || !room.current_question?.time_limit_seconds) return;
+			remaining = Math.max(0, (deadlineAt - performance.now()) / 1000);
+		}, 150);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
+			window.clearInterval(clock);
+			document.removeEventListener('fullscreenchange', updateFullscreenState);
+			waitingAudio?.dispose();
+			waitingAudio = null;
+			liveAudio?.dispose();
+			liveAudio = null;
 		};
+	});
+
+	$effect(() => {
+		const currentRoom = room;
+		if (currentRoom?.status === 'waiting') {
+			waitingAudio?.start();
+			liveAudio?.stopAmbient();
+			return;
+		}
+		waitingAudio?.stop();
+		if (currentRoom?.status !== 'active' || !currentRoom.current_question) {
+			liveAudio?.stopAmbient();
+			return;
+		}
+
+		liveAudio?.start();
+		if (lastAudioQuestionIndex !== currentRoom.question_index) {
+			lastAudioQuestionIndex = currentRoom.question_index;
+			lastTickSecond = -1;
+			lastUrgencySecond = -1;
+		}
+		const seconds = Math.ceil(remaining);
+		if (seconds !== lastUrgencySecond) {
+			lastUrgencySecond = seconds;
+			const urgency = Math.max(0, Math.min((11 - seconds) / 10, 1));
+			liveAudio?.setTimerUrgency(urgency);
+			if (seconds > 0 && seconds <= 10 && seconds !== lastTickSecond) {
+				lastTickSecond = seconds;
+				liveAudio?.playTick(urgency);
+			}
+		}
 	});
 
 	$effect(() => {
@@ -89,7 +179,8 @@
 		busy = true;
 		error = '';
 		try {
-			room = await startGameRoom(roomCode);
+			const requestStartedAt = performance.now();
+			updateRoom(await startGameRoom(roomCode), requestStartedAt);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'The live game could not be started.';
 		} finally {
@@ -102,12 +193,27 @@
 		busy = true;
 		error = '';
 		try {
-			room = await advanceGameRoom(roomCode);
+			const requestStartedAt = performance.now();
+			updateRoom(await advanceGameRoom(roomCode), requestStartedAt);
 		} catch (cause) {
 			error =
 				cause instanceof Error
 					? cause.message
 					: 'The group could not advance to the next question.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function selectQuestion(questionIndex: number) {
+		if (busy || !room || room.status !== 'active' || questionIndex === room.question_index) return;
+		busy = true;
+		error = '';
+		try {
+			const requestStartedAt = performance.now();
+			updateRoom(await advanceGameRoom(roomCode, questionIndex), requestStartedAt);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'The selected question could not be opened.';
 		} finally {
 			busy = false;
 		}
@@ -147,6 +253,82 @@
 	function participantIcon(index: number) {
 		return avatarIcons[index % avatarIcons.length];
 	}
+
+	function toggleWaitingSound() {
+		if (soundNeedsGesture) {
+			waitingAudio?.start();
+			liveAudio?.start();
+			return;
+		}
+		soundEnabled = !soundEnabled;
+		waitingAudio?.setEnabled(soundEnabled);
+		liveAudio?.setEnabled(soundEnabled);
+	}
+
+	async function toggleFullscreen() {
+		try {
+			if (document.fullscreenElement === hostPage) {
+				await document.exitFullscreen();
+			} else if (hostPage?.requestFullscreen) {
+				await hostPage.requestFullscreen();
+			} else {
+				throw new Error('Full screen is not supported by this browser.');
+			}
+		} catch (cause) {
+			error =
+				cause instanceof Error
+					? cause.message
+					: 'Full screen could not be enabled. Check your browser permissions and try again.';
+		}
+	}
+
+	function formatDuration(seconds: number) {
+		const minutes = Math.floor(seconds / 60);
+		const remainder = seconds % 60;
+		return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+	}
+
+	function updateRoom(updated: GameRoom, requestStartedAt: number) {
+		const previousRoom = room;
+		if (
+			updated.status === 'active' &&
+			(!previousRoom ||
+				previousRoom.status === 'waiting' ||
+				previousRoom.question_index !== updated.question_index)
+		) {
+			const reference =
+				previousRoom?.status === 'active' ? previousRoom.standings : updated.standings;
+			roundStartRanks = Object.fromEntries(
+				reference.map((entry) => [leaderboardKey(entry), entry.rank])
+			);
+		}
+
+		room = updated;
+		const adjusted = Math.max(
+			0,
+			updated.time_remaining_seconds - (performance.now() - requestStartedAt) / 1000
+		);
+		remaining = updated.status === 'active' ? adjusted : 0;
+		deadlineAt = performance.now() + adjusted * 1000;
+	}
+
+	function leaderboardKey(entry: GameRoom['standings'][number]) {
+		return entry.participant_key ?? `name:${entry.learner_name.trim().toLocaleLowerCase()}`;
+	}
+
+	function rankMovement(entry: GameRoom['standings'][number]) {
+		const previousRank = roundStartRanks[leaderboardKey(entry)];
+		return previousRank === undefined ? 0 : previousRank - entry.rank;
+	}
+
+	function toggleLiveSound() {
+		if (soundNeedsGesture) {
+			liveAudio?.start();
+			return;
+		}
+		soundEnabled = !soundEnabled;
+		liveAudio?.setEnabled(soundEnabled);
+	}
 </script>
 
 <svelte:head>
@@ -154,7 +336,7 @@
 	<meta name="robots" content="noindex" />
 </svelte:head>
 
-<main class="host-page">
+<main class="host-page" bind:this={hostPage}>
 	{#if loading && !room}
 		<section class="host-shell loading-shell" role="status" aria-label="Opening the live room">
 			<span></span><span></span><span></span>
@@ -174,18 +356,33 @@
 					<p class="eyebrow">INSTRUCTOR-PACED LIVE SESSION</p>
 					<h1>{room.title}</h1>
 				</div>
-				<span
-					class:active={room.status === 'active'}
-					class:completed={room.status === 'completed'}
-					class="session-status"
-				>
-					<span></span>
-					{room.status === 'waiting'
-						? 'Waiting for learners'
-						: room.status === 'active'
-							? 'Live now'
-							: 'Session complete'}
-				</span>
+				<div class="session-tools">
+					{#if room.started_at && room.duration_seconds !== null}
+						<span class="session-duration" aria-live="off">
+							Elapsed {formatDuration(room.duration_seconds)}
+						</span>
+					{/if}
+					<button
+						class="fullscreen-button"
+						type="button"
+						aria-pressed={isFullscreen}
+						onclick={toggleFullscreen}
+					>
+						{isFullscreen ? 'Exit full screen' : 'Full screen'}
+					</button>
+					<span
+						class:active={room.status === 'active'}
+						class:completed={room.status === 'completed'}
+						class="session-status"
+					>
+						<span></span>
+						{room.status === 'waiting'
+							? 'Waiting for learners'
+							: room.status === 'active'
+								? 'Live now'
+								: 'Session complete'}
+					</span>
+				</div>
 			</div>
 		</header>
 
@@ -199,6 +396,28 @@
 						<div class="invite-content">
 							<p class="eyebrow">INVITE YOUR LEARNERS</p>
 							<h2>Scan to join, or enter the game code</h2>
+							<div class="waiting-audio-control">
+								<button
+									class="fullscreen-button"
+									type="button"
+									aria-pressed={soundEnabled && !soundNeedsGesture}
+									disabled={audioUnavailable}
+									onclick={toggleWaitingSound}
+								>
+									{audioUnavailable
+										? 'Waiting sound unavailable'
+										: soundNeedsGesture
+											? 'Enable waiting sound'
+											: `Waiting sound ${soundEnabled ? 'on' : 'off'}`}
+								</button>
+								{#if audioUnavailable}
+									<span role="status"
+										>The ambient sound could not be loaded; the game remains available.</span
+									>
+								{:else if soundNeedsGesture}
+									<span role="status">Your browser needs a tap before it can play sound.</span>
+								{/if}
+							</div>
 							<p>
 								On a phone or computer, open the join page and enter this code. Scanning the QR code
 								fills it in for them.
@@ -268,28 +487,59 @@
 				{:else if room.status === 'active' && room.current_question}
 					<div class="question-card">
 						<div class="question-topline">
-							<span>QUESTION {room.question_index + 1} / {room.question_count}</span>
-							<span>{room.answered_count} / {room.participant_count} answered</span>
+							<label class="question-picker">
+								<span>Question</span>
+								<select
+									value={room.question_index}
+									aria-label="Select a live question"
+									disabled={busy}
+									onchange={(event) => void selectQuestion(Number(event.currentTarget.value))}
+								>
+									{#each questionNumbers as questionIndex (questionIndex)}
+										<option value={questionIndex}>{questionIndex + 1}</option>
+									{/each}
+								</select>
+								<span>of {room.question_count}</span>
+							</label>
+							<div
+								class="round-answer-count"
+								aria-label="{room.answered_count} of {room.participant_count} learners answered"
+							>
+								<strong>{room.answered_count}<span> / {room.participant_count}</span></strong>
+								<small>answered this round</small>
+							</div>
+							<button
+								class="fullscreen-button live-sound-button"
+								type="button"
+								aria-pressed={soundEnabled && !soundNeedsGesture}
+								disabled={audioUnavailable}
+								onclick={toggleLiveSound}
+							>
+								{audioUnavailable
+									? 'Sound unavailable'
+									: soundNeedsGesture
+										? 'Enable sound'
+										: `Sound ${soundEnabled ? 'on' : 'off'}`}
+							</button>
 						</div>
 						<h2>{room.current_question.prompt}</h2>
-						{#if room.current_question.time_limit_seconds > 0}
-							<p class="timer-note">
-								Shared timer: <strong>{Math.ceil(room.time_remaining_seconds)} seconds</strong> remaining
-							</p>
-						{:else}
-							<p class="timer-note">This question is untimed.</p>
-						{/if}
 						<div
-							class="answer-meter"
-							role="progressbar"
-							aria-label="Participants answered"
-							aria-valuenow={room.answered_count}
-							aria-valuemin="0"
-							aria-valuemax={room.participant_count}
+							class="shared-timer"
+							class:timer-warning={remaining <= 10}
+							class:timer-urgent={remaining <= 5}
+							role="timer"
+							aria-live="off"
+							aria-label="{Math.ceil(
+								remaining
+							)} seconds remaining on question {room.question_index + 1}"
 						>
-							<span
-								style={`width:${room.participant_count ? (room.answered_count / room.participant_count) * 100 : 0}%`}
-							></span>
+							<strong>{Math.ceil(remaining)}</strong>
+							<span>
+								<b>seconds left</b>
+								<small
+									>{remaining <= 10 ? 'Final seconds — choose now' : 'Shared round timer'}</small
+								>
+							</span>
 						</div>
 						<div class="answer-options">
 							{#each room.current_question.options as option, index (option.id)}
@@ -310,8 +560,8 @@
 							<span aria-hidden="true">→</span>
 						</button>
 						<p class="helper-note">
-							Unanswered learners receive zero when you advance. Wait for more answers or move the
-							group forward.
+							Previous answers stay locked if you revisit a question. Unanswered questions receive
+							zero when the game ends.
 						</p>
 					</div>
 				{:else}
@@ -340,8 +590,10 @@
 			<aside class="participants-panel" aria-labelledby="participants-heading">
 				<div class="participants-heading">
 					<div>
-						<p class="eyebrow">YOUR ROOM</p>
-						<h2 id="participants-heading">Learners</h2>
+						<p class="eyebrow">{room.status === 'waiting' ? 'YOUR ROOM' : 'LIVE STANDINGS'}</p>
+						<h2 id="participants-heading">
+							{room.status === 'waiting' ? 'Learners' : 'Leaderboard'}
+						</h2>
 					</div>
 					<span class="participant-count">{room.participant_count}</span>
 				</div>
@@ -349,36 +601,61 @@
 					{room.status === 'waiting'
 						? 'Names appear here as people join.'
 						: room.status === 'active'
-							? 'Live progress updates automatically.'
-							: 'Thanks for playing together.'}
+							? 'Scores update as answers arrive. Arrows compare this round with where learners started.'
+							: 'Final scores for everyone who played.'}
 				</p>
-				{#if room.participants.length}
+				{#if room.status === 'waiting' && room.participants.length}
 					<ul class="participant-list" aria-live="polite" aria-relevant="additions text">
 						{#each room.participants as participant, index (`${participant.learner_name}-${index}`)}
 							<li>
 								<span class="avatar" aria-hidden="true">{participantIcon(index)}</span>
 								<strong>{participant.learner_name}</strong>
-								{#if room.status === 'active'}
-									<span
-										class:answered={room.participants[index]?.answered}
-										class="participant-state"
-									>
-										{room.participants[index]?.answered ? 'Answered' : 'Playing'}
-									</span>
-								{/if}
 							</li>
 						{/each}
 					</ul>
-				{:else}
+				{:else if room.status === 'waiting'}
 					<div class="empty-participants">
 						<span class="empty-people" aria-hidden="true">◎</span>
 						<strong>No one has joined yet</strong>
 						<span>Share the link, code, or QR code to welcome your learners.</span>
 					</div>
 				{/if}
-				<div class="room-capacity-note">
-					Open guest access <span>·</span> No plan-based participant cap
-				</div>
+				{#if room.status !== 'waiting' && room.standings.length}
+					<ol class="leaderboard-list" aria-label="Current learner standings">
+						{#each room.standings as entry (entry.rank)}
+							{@const movement = rankMovement(entry)}
+							<li class:leader={entry.rank === 1}>
+								<span class="leaderboard-rank">#{entry.rank}</span>
+								<span class="leaderboard-player">
+									<strong>{entry.learner_name}</strong>
+									<small>{entry.score} pts</small>
+								</span>
+								<span
+									class="leaderboard-movement"
+									class:moved-up={movement > 0}
+									class:moved-down={movement < 0}
+									aria-label={movement > 0
+										? `Moved up ${movement} places`
+										: movement < 0
+											? `Moved down ${Math.abs(movement)} places`
+											: 'No change in position'}
+								>
+									{movement > 0 ? `↑ ${movement}` : movement < 0 ? `↓ ${Math.abs(movement)}` : '—'}
+								</span>
+							</li>
+						{/each}
+					</ol>
+				{:else if room.status !== 'waiting'}
+					<div class="empty-participants">
+						<strong>No standings yet</strong>
+						<span>Scores will appear here as learners answer.</span>
+					</div>
+				{/if}
+				{#if room.status === 'waiting'}
+					<div class="room-capacity-note">
+						Open guest access <span>·</span> No plan-based participant cap
+					</div>
+				{/if}
 			</aside>
 		</div>
 	{/if}
@@ -413,6 +690,39 @@
 		align-items: end;
 		gap: 1rem;
 		padding-bottom: 1.2rem;
+	}
+	.session-tools {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.55rem;
+	}
+	.session-duration {
+		color: var(--ink-muted);
+		font-size: 0.72rem;
+		font-weight: 750;
+	}
+	.fullscreen-button {
+		padding: 0.55rem 0.75rem;
+		border: 1px solid var(--line);
+		border-radius: 0.6rem;
+		background: white;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.7rem;
+		font-weight: 750;
+		cursor: pointer;
+	}
+	.fullscreen-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.65;
+	}
+	.host-page:fullscreen {
+		width: 100%;
+		min-height: 100vh;
+		overflow-y: auto;
+		background: #f5f3ee;
 	}
 	.eyebrow {
 		margin: 0 0 0.4rem;
@@ -459,6 +769,18 @@
 	}
 	.session-status.completed > span {
 		background: #516487;
+	}
+	.waiting-audio-control {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		margin: -0.35rem 0 0.9rem;
+	}
+	.waiting-audio-control > span {
+		color: var(--ink-muted);
+		font-size: 0.68rem;
+		line-height: 1.4;
 	}
 	.host-layout {
 		display: grid;
@@ -725,15 +1047,6 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.participant-state {
-		margin-left: auto;
-		color: var(--ink-muted);
-		font-size: 0.64rem;
-	}
-	.participant-state.answered {
-		color: #25744d;
-		font-weight: 800;
-	}
 	.empty-participants {
 		display: grid;
 		justify-items: center;
@@ -779,37 +1092,114 @@
 	}
 	.question-topline {
 		display: flex;
+		align-items: center;
 		justify-content: space-between;
-		gap: 0.5rem;
+		flex-wrap: wrap;
+		gap: 0.7rem;
 		color: var(--ink-muted);
 		font-size: 0.68rem;
 		font-weight: 850;
 	}
+	.question-picker {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+	.question-picker select {
+		min-width: 3rem;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: white;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.8rem;
+		font-weight: 850;
+	}
+	.round-answer-count {
+		display: grid;
+		gap: 0.1rem;
+		padding: 0.4rem 0.7rem;
+		border: 1px solid var(--line);
+		border-radius: 0.65rem;
+		background: #fffdf9;
+		text-align: center;
+	}
+	.round-answer-count strong {
+		color: var(--navy);
+		font-size: 0.85rem;
+	}
+	.round-answer-count strong span {
+		color: var(--ink-muted);
+		font-weight: 650;
+	}
+	.round-answer-count small {
+		color: var(--ink-muted);
+		font-size: 0.58rem;
+		font-weight: 700;
+	}
+	.live-sound-button {
+		margin-left: auto;
+	}
 	.question-card h2 {
-		margin-block: 1.2rem 0.4rem;
+		margin-block: 1.25rem 0.5rem;
 		font-size: clamp(1.35rem, 3vw, 2rem);
 	}
-	.timer-note,
 	.helper-note {
 		color: var(--ink-muted);
 		font-size: 0.76rem;
 	}
-	.timer-note strong {
+	.shared-timer {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		width: fit-content;
+		margin-block: 1.2rem;
+		padding: 0.8rem 1.2rem;
+		border: 2px solid #e5d4ad;
+		border-radius: 1.1rem;
+		background: #fffaf0;
 		color: var(--navy);
+		transition:
+			border-color 200ms ease,
+			background-color 200ms ease,
+			color 200ms ease;
 	}
-	.answer-meter {
-		height: 0.55rem;
-		overflow: hidden;
-		margin: 1rem 0;
-		border-radius: 99px;
-		background: #eee9df;
+	.shared-timer > strong {
+		min-width: 4.8rem;
+		font:
+			850 clamp(3rem, 8vw, 5rem)/0.95 Manrope,
+			sans-serif;
+		letter-spacing: -0.08em;
+		text-align: center;
+		font-variant-numeric: tabular-nums;
 	}
-	.answer-meter span {
-		display: block;
-		height: 100%;
-		border-radius: inherit;
-		background: var(--gold-deep);
-		transition: width 180ms ease;
+	.shared-timer > span {
+		display: grid;
+		gap: 0.25rem;
+	}
+	.shared-timer b {
+		font-size: 0.9rem;
+	}
+	.shared-timer small {
+		color: var(--ink-muted);
+		font-size: 0.7rem;
+	}
+	.shared-timer.timer-warning {
+		border-color: #df9c48;
+		background: #fff4e2;
+		color: #9a5c13;
+	}
+	.shared-timer.timer-urgent {
+		border-color: #bd6752;
+		background: #fff0ec;
+		color: #9a3f2d;
+		animation: timer-pulse 750ms ease-in-out infinite alternate;
+	}
+	@keyframes timer-pulse {
+		to {
+			box-shadow: 0 0 0.9rem #bd67524d;
+		}
 	}
 	.answer-options {
 		display: grid;
@@ -872,6 +1262,80 @@
 	}
 	.standing-row b {
 		color: var(--navy);
+	}
+	.leaderboard-list {
+		display: grid;
+		gap: 0.45rem;
+		max-height: min(66vh, 42rem);
+		overflow: auto;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.leaderboard-list li {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 0.7rem;
+		padding: 0.75rem;
+		border: 1px solid #eeece6;
+		border-radius: 0.75rem;
+		background: #fff;
+	}
+	.leaderboard-list li.leader {
+		border-color: #e5d4ad;
+		background: #fffaf0;
+	}
+	.leaderboard-rank {
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		flex: 0 0 auto;
+		place-items: center;
+		border-radius: 50%;
+		background: #f1eee7;
+		color: var(--navy);
+		font-size: 0.7rem;
+		font-weight: 850;
+	}
+	.leaderboard-list li.leader .leaderboard-rank {
+		background: #f4e3b6;
+	}
+	.leaderboard-player {
+		display: grid;
+		min-width: 0;
+		gap: 0.15rem;
+	}
+	.leaderboard-player strong {
+		overflow: hidden;
+		color: var(--ink);
+		font-size: 0.78rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.leaderboard-player small {
+		color: var(--ink-muted);
+		font-size: 0.66rem;
+		font-weight: 700;
+	}
+	.leaderboard-movement {
+		margin-left: auto;
+		padding: 0.25rem 0.4rem;
+		border-radius: 0.45rem;
+		background: #f1f0ec;
+		color: var(--ink-muted);
+		font-size: 0.65rem;
+		font-weight: 850;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.leaderboard-movement.moved-up {
+		background: #e8f4ec;
+		color: #25744d;
+	}
+	.leaderboard-movement.moved-down {
+		background: #fff0ee;
+		color: #9a3f2d;
 	}
 	.host-alert,
 	.host-notice {
@@ -975,8 +1439,8 @@
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.answer-meter span {
-			transition: none;
+		.shared-timer.timer-urgent {
+			animation: none;
 		}
 		.qr-placeholder {
 			animation: none;

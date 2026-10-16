@@ -106,14 +106,11 @@ function questionFromRow(row: ImportRow, rowNumber: number): QuestionDraft {
 	const timeLimit = optionalInteger(
 		row.time_limit_seconds,
 		30,
-		0,
+		5,
 		300,
 		rowNumber,
 		'time_limit_seconds'
 	);
-	if (timeLimit > 0 && timeLimit < 5) {
-		throw new Error(`Row ${rowNumber}: time_limit_seconds must be 0 or between 5 and 300.`);
-	}
 
 	const choices = options.map((text) => ({ id: crypto.randomUUID(), text }));
 	return {

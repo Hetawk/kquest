@@ -258,10 +258,10 @@ export function startGameRoom(roomCode: string) {
 	});
 }
 
-export function advanceGameRoom(roomCode: string) {
+export function advanceGameRoom(roomCode: string, questionIndex?: number) {
 	return request<GameRoom>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}/advance`, {
 		method: 'POST',
-		body: JSON.stringify({})
+		body: JSON.stringify(questionIndex === undefined ? {} : { question_index: questionIndex })
 	});
 }
 

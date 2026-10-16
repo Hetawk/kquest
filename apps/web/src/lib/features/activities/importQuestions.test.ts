@@ -55,6 +55,21 @@ describe('question file import', () => {
 		expect(question?.time_limit_seconds).toBe(30);
 	});
 
+	it('rejects a zero timer because timing is selected by session mode', async () => {
+		const file = new File(
+			[
+				'question,option_a,option_b,correct_answer,time_limit_seconds\n' +
+					'"Which is largest?","Jupiter","Mars","A",0'
+			],
+			'questions.csv',
+			{ type: 'text/csv' }
+		);
+
+		await expect(importQuestionFile(file)).rejects.toThrow(
+			'time_limit_seconds must be an integer from 5 to 300'
+		);
+	});
+
 	it('imports all 40 questions from the NIA review CSV', async () => {
 		const csv = await readFile(new URL('../../../../docs/questions.csv', import.meta.url), 'utf8');
 		const file = new File([csv], 'questions.csv', { type: 'text/csv' });

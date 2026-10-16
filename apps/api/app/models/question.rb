@@ -7,7 +7,7 @@ class Question < ApplicationRecord
   validates :speed_bonus_points, numericality: { only_integer: true, in: 0..100_000 }
   validates :time_limit_seconds, numericality: {
     only_integer: true,
-    greater_than_or_equal_to: 0,
+    greater_than_or_equal_to: 5,
     less_than_or_equal_to: Questions::Types::SingleChoice::MAX_TIME_LIMIT_SECONDS
   }
   validate :definition_is_valid

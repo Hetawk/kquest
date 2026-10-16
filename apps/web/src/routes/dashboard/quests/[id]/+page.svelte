@@ -22,11 +22,8 @@
 	let quickPoints = $state(1);
 	let quickSpeedBonusPoints = $state(100);
 	let quickTimeLimitSeconds = $state(30);
-	const totalTimedSeconds = $derived(
-		activity?.questions.reduce((sum, question) => sum + question.time_limit_seconds, 0) ?? 0
-	);
-	const untimedQuestionCount = $derived(
-		activity?.questions.filter((question) => question.time_limit_seconds === 0).length ?? 0
+	const totalLiveTimerSeconds = $derived(
+		activity?.questions.reduce((sum, question) => sum + (question.time_limit_seconds || 30), 0) ?? 0
 	);
 
 	onMount(() => {
@@ -115,7 +112,7 @@
 		quickEditingQuestionId = question.id;
 		quickPoints = question.points;
 		quickSpeedBonusPoints = question.speed_bonus_points ?? question.points;
-		quickTimeLimitSeconds = question.time_limit_seconds;
+		quickTimeLimitSeconds = question.time_limit_seconds || 30;
 	}
 
 	async function saveQuestionRevision(questions: CreatorActivityDetail['questions']) {
@@ -150,9 +147,10 @@
 			quickSpeedBonusPoints < 0 ||
 			quickSpeedBonusPoints > 100_000 ||
 			!Number.isInteger(quickTimeLimitSeconds) ||
-			(quickTimeLimitSeconds !== 0 && (quickTimeLimitSeconds < 5 || quickTimeLimitSeconds > 300))
+			quickTimeLimitSeconds < 5 ||
+			quickTimeLimitSeconds > 300
 		) {
-			error = 'Points must be 1–1,000, speed bonus 0–100,000, and time 0 or 5–300 seconds.';
+			error = 'Points must be 1–1,000, speed bonus 0–100,000, and live timer 5–300 seconds.';
 			return;
 		}
 
@@ -239,19 +237,9 @@
 					<span><strong>{activity.question_count}</strong> questions</span>
 					<span><strong>{activity.total_plays}</strong> completed plays</span>
 					<span>
-						{#if untimedQuestionCount > 0 && totalTimedSeconds === 0}
-							<strong>Untimed</strong> · no fixed completion time
-						{:else}
-							<strong
-								>{untimedQuestionCount > 0 ? 'At least ' : 'Up to '}
-								{formatDuration(totalTimedSeconds)}</strong
-							>
-							timer time
-							{#if untimedQuestionCount > 0}
-								· {untimedQuestionCount} untimed
-							{/if}
-						{/if}
+						<strong>Up to {formatDuration(totalLiveTimerSeconds)}</strong> live timer allowance
 					</span>
+					<span><strong>Participant-paced</strong> no question countdown</span>
 					<span>Published {formatDate(activity.published_at)}</span>
 				</div>
 			</div>
@@ -341,9 +329,9 @@
 						<p class="eyebrow">Question library</p>
 						<h2>Inside this quest</h2>
 						<p class="duration-hint">
-							Timer estimate only; actual play may be shorter{untimedQuestionCount > 0
-								? ', and untimed questions have no fixed duration.'
-								: '.'}
+							The live timer allowance is a maximum; hosts can advance sooner. Participant-paced
+							sessions have no question countdown, and completed sessions record their actual
+							duration.
 						</p>
 					</div>
 					<div class="section-heading-actions">
@@ -384,11 +372,7 @@
 												? 'Multiple select'
 												: 'Single choice'}</span
 										>
-										<span
-											>{question.time_limit_seconds === 0
-												? 'Untimed'
-												: `${question.time_limit_seconds}s`}</span
-										>
+										<span>{question.time_limit_seconds || 30}s live</span>
 										<span>{question.points} pts</span>
 										{#if activity.speed_scoring && question.time_limit_seconds > 0}
 											<span
@@ -421,7 +405,7 @@
 												<span>Max speed bonus</span>
 												<input
 													type="number"
-													min="0"
+													min="5"
 													max="100000"
 													step="1"
 													bind:value={quickSpeedBonusPoints}
@@ -439,7 +423,7 @@
 													aria-label="Time limit"
 													disabled={busy}
 												/>
-												<small>0 for untimed, or 5–300 seconds</small>
+												<small>5–300 seconds in instructor-paced live play</small>
 											</label>
 											<div class="quick-settings-actions">
 												<button

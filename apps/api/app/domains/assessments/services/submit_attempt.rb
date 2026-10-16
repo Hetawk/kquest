@@ -7,8 +7,8 @@ module Assessments
       class IdempotencyConflict < StandardError
       end
 
-      def self.call(activity_version:, learner_name:, responses:, submission_key:, game_room: nil)
-        normalized_responses = normalize_responses(activity_version, responses)
+      def self.call(activity_version:, learner_name:, responses:, submission_key:, game_room: nil, started_at: nil)
+        normalized_responses = normalize_responses(activity_version, responses, speed_scoring: game_room.present?)
         raise InvalidResponses unless learner_name.is_a?(String) && learner_name.strip.length.between?(1, 80)
 
         existing_attempt = Attempt.find_by(submission_key: submission_key)
@@ -20,9 +20,14 @@ module Assessments
           response.fetch("points_awarded")
         end
         max_score = snapshots.sum do |question|
-          Questions::Types::SingleChoice.maximum_points(question)
+          if game_room
+            Questions::Types::SingleChoice.maximum_points(question)
+          else
+            question.fetch("points")
+          end
         end
 
+        submitted_at = Time.current
         attempt = Attempt.create!(
           activity_version: activity_version,
           game_room: game_room,
@@ -32,7 +37,8 @@ module Assessments
           score: score,
           max_score: max_score,
           total_response_time_ms: normalized_responses.sum { |response| response["response_time_ms"].to_i },
-          submitted_at: Time.current
+          started_at: started_at,
+          submitted_at: submitted_at
         )
 
         [ attempt, false ]
@@ -41,7 +47,7 @@ module Assessments
         reuse_attempt(existing_attempt, learner_name, normalized_responses)
       end
 
-      def self.normalize_responses(activity_version, responses)
+      def self.normalize_responses(activity_version, responses, speed_scoring:)
         snapshots = activity_version.question_snapshot
         raise InvalidResponses unless responses.is_a?(Array) && responses.length == snapshots.length
 
@@ -71,13 +77,13 @@ module Assessments
           end
           selected = multiple_select ? option_ids : option_id
           answered = multiple_select ? option_ids.any? : option_id.present?
-          award = if answered && response_time_ms && multiple_select
+          award = if speed_scoring && answered && response_time_ms && multiple_select
             Questions::Types::MultipleSelect.score_with_speed(
               question: question,
               selected_option_ids: option_ids,
               elapsed_seconds: response_time_ms / 1000.0
             )
-          elsif answered && response_time_ms
+          elsif speed_scoring && answered && response_time_ms
             Questions::Types::SingleChoice.score_with_speed(
               question: question,
               selected_option_id: option_id,

@@ -16,8 +16,8 @@ module Activities
               question_type: question.fetch("question_type", "single_choice"),
               points: question.fetch("points"),
               speed_bonus_points: question.fetch("speed_bonus_points", question.fetch("points")),
-              speed_scoring: question.fetch("speed_scoring", false),
-              time_limit_seconds: question.fetch("time_limit_seconds", 30),
+              speed_scoring: false,
+              time_limit_seconds: 0,
               options: question.fetch("options").map do |option|
                 { id: option.fetch("id"), text: option.fetch("text") }
               end
@@ -35,6 +35,10 @@ module Activities
           learner_name: attempt.learner_name,
           score: attempt.score,
           max_score: attempt.max_score,
+          started_at: attempt.started_at&.iso8601(6),
+          completed_at: attempt.submitted_at.iso8601(6),
+          duration_seconds: attempt.started_at &&
+            [ (attempt.submitted_at - attempt.started_at).floor, 0 ].max,
           total_response_time_ms: attempt.responses.sum { |response| response["response_time_ms"].to_i },
           results: snapshot.map do |question|
             response = responses.fetch(question.fetch("id"))
@@ -53,7 +57,7 @@ module Activities
               points_awarded: response.fetch("points_awarded"),
               speed_bonus: response.fetch("speed_bonus", 0),
               response_time_ms: response["response_time_ms"],
-              points_possible: Questions::Types::SingleChoice.maximum_points(question),
+              points_possible: question.fetch("points"),
               base_points: question.fetch("points"),
               correct: correct
             }

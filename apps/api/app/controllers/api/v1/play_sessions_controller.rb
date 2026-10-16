@@ -11,10 +11,8 @@ module Api
           learner_name: attributes[:learner_name],
           start_key: request.headers["Idempotency-Key"]
         )
-        question = activity_version.question_snapshot.fetch(session.current_question_index)
-        time_limit = question.fetch("time_limit_seconds", Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS)
-        remaining = time_limit.positive? ?
-          [ time_limit - (Time.current - session.question_started_at), 0 ].max : 0
+        time_limit = 0
+        remaining = 0
 
         render(
           json: {

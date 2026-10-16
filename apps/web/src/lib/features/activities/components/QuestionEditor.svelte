@@ -8,6 +8,10 @@
 		onRemove,
 		onMoveUp,
 		onMoveDown,
+		onDragStart,
+		onDragOver,
+		onDrop,
+		onDragEnd,
 		canMoveUp,
 		canMoveDown,
 		canRemove
@@ -18,6 +22,10 @@
 		onRemove: () => void;
 		onMoveUp: () => void;
 		onMoveDown: () => void;
+		onDragStart?: (event: DragEvent) => void;
+		onDragOver?: (event: DragEvent) => void;
+		onDrop?: (event: DragEvent) => void;
+		onDragEnd?: () => void;
 		canMoveUp: boolean;
 		canMoveDown: boolean;
 		canRemove: boolean;
@@ -77,8 +85,19 @@
 	}
 </script>
 
-<fieldset class="question-editor">
+<fieldset class="question-editor" ondragover={onDragOver} ondrop={onDrop}>
 	<legend class="question-legend">
+		{#if onDragStart}
+			<button
+				class="drag-handle"
+				type="button"
+				draggable="true"
+				aria-label="Drag question {index + 1} to reorder"
+				title="Drag to reorder"
+				ondragstart={onDragStart}
+				ondragend={onDragEnd}>⠿</button
+			>
+		{/if}
 		<span class="question-number">{String(index + 1).padStart(2, '0')}</span>
 		<span>Question {index + 1}</span>
 		<button
@@ -244,39 +263,27 @@
 	</div>
 
 	<div class="timing-settings">
-		<label class="timer-toggle">
+		<label class="points-label" for="time-limit-{index}">
+			<span>Live question timer</span>
 			<input
-				type="checkbox"
-				checked={question.time_limit_seconds === 0}
-				onchange={(event) =>
+				id="time-limit-{index}"
+				class="points-input"
+				type="number"
+				min="5"
+				max="300"
+				step="1"
+				value={question.time_limit_seconds || 30}
+				oninput={(event) =>
 					onUpdate({
 						...question,
-						time_limit_seconds: event.currentTarget.checked ? 0 : 30
+						time_limit_seconds: Number.parseInt(event.currentTarget.value, 10) || 0
 					})}
+				required
 			/>
-			<span>No time limit</span>
 		</label>
-		{#if question.time_limit_seconds > 0}
-			<label class="points-label" for="time-limit-{index}">
-				<span>Time limit (seconds)</span>
-				<input
-					id="time-limit-{index}"
-					class="points-input"
-					type="number"
-					min="5"
-					max="300"
-					step="1"
-					value={question.time_limit_seconds}
-					oninput={(event) =>
-						onUpdate({
-							...question,
-							time_limit_seconds: Number.parseInt(event.currentTarget.value, 10) || 0
-						})}
-					required
-				/>
-			</label>
-		{/if}
-		<p class="field-hint">Choose 5–300 seconds, or allow learners to work at their own pace.</p>
+		<p class="field-hint">
+			Used in instructor-paced play. Participant-paced play has no countdown.
+		</p>
 	</div>
 </fieldset>
 
@@ -311,6 +318,24 @@
 		color: var(--navy);
 		font-size: 0.7rem;
 		letter-spacing: 0.04em;
+	}
+
+	.drag-handle {
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		place-items: center;
+		padding: 0;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: white;
+		color: var(--ink-muted);
+		font-size: 1.1rem;
+		cursor: grab;
+	}
+
+	.drag-handle:active {
+		cursor: grabbing;
 	}
 
 	.remove-button {
@@ -393,19 +418,6 @@
 		justify-content: space-between;
 		gap: 1rem;
 		margin-top: 0.85rem;
-	}
-
-	.timer-toggle {
-		display: flex;
-		align-items: center;
-		gap: 0.45rem;
-		color: var(--ink-soft);
-		font-size: 0.78rem;
-		font-weight: 700;
-	}
-
-	.timer-toggle input {
-		accent-color: var(--navy);
 	}
 
 	.option-heading {

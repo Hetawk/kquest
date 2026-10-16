@@ -21,7 +21,7 @@ module Assessments
           current_question_index: 0,
           responses: [],
           question_started_at: game_room ? nil : Time.current,
-          expires_at: 1.hour.from_now
+          expires_at: game_room ? 1.hour.from_now : 30.days.from_now
         }
         if game_room
           game_room.with_lock do

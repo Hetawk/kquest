@@ -87,16 +87,48 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       as: :json
   end
 
+  def create_game_room(activity_id)
+    post "/api/v1/activities/#{activity_id}/game_rooms",
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :created
+    response.parsed_body.dig("data", "room_code")
+  end
+
+  def join_game_room(room_code:, name:)
+    post "/api/v1/game_rooms/#{room_code}/participants",
+      params: { participant: { learner_name: name } },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :created
+    response.parsed_body.dig("data", "session_id")
+  end
+
+  def start_game_room(room_code:)
+    post "/api/v1/game_rooms/#{room_code}/start",
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    response.parsed_body.fetch("data")
+  end
+
+  def answer_game_room(room_code:, session_id:, question_id:, option_id:)
+    post "/api/v1/game_rooms/#{room_code}/participants/#{session_id}/answers",
+      params: { answer: { question_id: question_id, option_id: option_id } },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+  end
+
   def fetch_csrf_token
     get "/api/v1/auth/csrf", as: :json
     response.parsed_body.dig("data", "token")
   end
 
-  test "creates, publishes, safely plays, and scores a server-timed quest" do
+  test "participant-paced play ignores live timers and records elapsed duration" do
     activity_id = create_activity(
       questions: [
         question_definition(time_limit_seconds: 15),
-        question_definition(prompt: "Which planet is closest to the Sun?", correct_index: 1, time_limit_seconds: 0)
+        question_definition(prompt: "Which planet is closest to the Sun?", correct_index: 1, time_limit_seconds: 30)
       ]
     )
     publication = publish_activity(activity_id)
@@ -110,7 +142,8 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     public_activity = response.parsed_body.fetch("data")
     assert_equal "The Solar System Sprint", public_activity.fetch("title")
     assert_equal 2, public_activity.fetch("questions").length
-    assert_equal [ 15, 0 ], public_activity.fetch("questions").map { |question| question.fetch("time_limit_seconds") }
+    assert_equal [ 0, 0 ], public_activity.fetch("questions").map { |question| question.fetch("time_limit_seconds") }
+    assert_equal [ false, false ], public_activity.fetch("questions").map { |question| question.fetch("speed_scoring") }
     assert_nil public_activity["cover_image_url"]
     refute_includes response.body, "correct_option_id"
 
@@ -118,33 +151,42 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :created
     session = response.parsed_body.fetch("data")
     assert_equal 0, session.fetch("question_index")
-    assert_equal 15, session.fetch("time_limit_seconds")
+    assert_equal 0, session.fetch("time_limit_seconds")
+    assert_equal 0, session.fetch("time_remaining_seconds")
     questions = public_activity.fetch("questions")
     first_answer = questions[0].fetch("options")[0].fetch("id")
     second_answer = questions[1].fetch("options")[1].fetch("id")
 
-    answer_question(
-      share_code: publication.fetch("share_code"),
-      session_id: session.fetch("id"),
-      question_id: questions[0].fetch("id"),
-      option_id: first_answer
-    )
-    assert_response :success
-    assert_equal true, response.parsed_body.dig("data", "is_correct")
-    assert_equal 1, response.parsed_body.dig("data", "question_index")
-    assert_equal 0, response.parsed_body.dig("data", "time_limit_seconds")
+    session_started_at = PlaySession.find(session.fetch("id")).created_at
+    travel_to(session_started_at + 16.seconds, with_usec: true) do
+      answer_question(
+        share_code: publication.fetch("share_code"),
+        session_id: session.fetch("id"),
+        question_id: questions[0].fetch("id"),
+        option_id: first_answer
+      )
+      assert_response :success
+      assert_equal true, response.parsed_body.dig("data", "is_correct")
+      assert_equal 1, response.parsed_body.dig("data", "question_index")
+      assert_equal 0, response.parsed_body.dig("data", "time_limit_seconds")
 
-    answer_question(
-      share_code: publication.fetch("share_code"),
-      session_id: session.fetch("id"),
-      question_id: questions[1].fetch("id"),
-      option_id: second_answer
-    )
-    assert_response :success
-    result = response.parsed_body.fetch("data").fetch("attempt")
-    assert_equal 300, result.fetch("score")
-    assert_equal 300, result.fetch("max_score")
-    assert_equal false, result.fetch("results").first.fetch("timed_out")
+      answer_question(
+        share_code: publication.fetch("share_code"),
+        session_id: session.fetch("id"),
+        question_id: questions[1].fetch("id"),
+        option_id: second_answer
+      )
+      assert_response :success
+      result = response.parsed_body.fetch("data").fetch("attempt")
+      assert_equal 200, result.fetch("score")
+      assert_equal 200, result.fetch("max_score")
+      assert_equal false, result.fetch("results").first.fetch("timed_out")
+      assert_equal 0, result.fetch("results").first.fetch("speed_bonus")
+      assert_equal 16, result.fetch("duration_seconds")
+      assert_equal session_started_at.iso8601(6), result.fetch("started_at")
+      assert_equal result.fetch("completed_at"), Attempt.find(result.fetch("id")).submitted_at.iso8601(6)
+    end
+
     assert_equal 1, Attempt.count
   end
 
@@ -245,7 +287,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal "The Solar System, Revisited", response.parsed_body.dig("data", "title")
     assert_equal [ "Bravo", "Alpha, revised" ], revised_questions.map { |question| question.fetch("prompt") }
     assert_equal 500, revised_questions.last.fetch("speed_bonus_points")
-    assert_equal [ 30, 45 ], revised_questions.map { |question| question.fetch("time_limit_seconds") }
+    assert_equal [ 0, 0 ], revised_questions.map { |question| question.fetch("time_limit_seconds") }
 
     get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
     assert_response :success
@@ -256,6 +298,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal false, ActivityVersion.find_by!(share_code: revised_publication.fetch("share_code")).shuffle_questions
     assert_equal false, ActivityVersion.find_by!(share_code: revised_publication.fetch("share_code")).speed_scoring
     assert_equal false, creator_activity.fetch("speed_scoring")
+    assert_equal [ 30, 45 ], creator_activity.fetch("questions").map { |question| question.fetch("time_limit_seconds") }
     assert_equal [ "Bravo", "Alpha, revised" ],
       creator_activity.fetch("questions").map { |question| question.fetch("prompt") }
     assert_equal revision_questions.last.fetch("correct_option_id"),
@@ -317,7 +360,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
   end
 
   test "publishes and scores a multiple-select question without exposing its answer key to learners" do
-    definition = question_definition(time_limit_seconds: 0)
+    definition = question_definition(time_limit_seconds: 30)
     correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
     activity_id = create_activity(
       questions: [
@@ -360,7 +403,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
   end
 
   test "rejects duplicate and unavailable multiple-select answers" do
-    definition = question_definition(time_limit_seconds: 0)
+    definition = question_definition(time_limit_seconds: 30)
     correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
     activity_id = create_activity(
       questions: [
@@ -392,13 +435,14 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 0, Attempt.count
   end
 
-  test "speed scoring awards a server-measured proportional bonus and caps the maximum" do
+  test "participant-paced scores use base points regardless of configured live timers" do
     activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
     publication = publish_activity(activity_id)
     question = publication_question(publication)
     session = start_session(publication.fetch("share_code"))
+    started_at = PlaySession.find(session.fetch("id")).created_at
 
-    travel 5.seconds do
+    travel_to(started_at + 15.seconds, with_usec: true) do
       answer_question(
         share_code: publication.fetch("share_code"),
         session_id: session.fetch("id"),
@@ -409,15 +453,14 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     result = response.parsed_body.dig("data", "attempt")
-    assert_equal 200, result.fetch("max_score")
-    response_time_ms = result.fetch("results").first.fetch("response_time_ms")
-    expected_bonus = (100 * [ 1 - response_time_ms / 10_000.0, 0 ].max).round
-    assert_equal 100 + expected_bonus, result.fetch("score")
-    assert_equal expected_bonus, result.fetch("results").first.fetch("speed_bonus")
-    assert_operator response_time_ms, :>=, 0
+    assert_equal 100, result.fetch("max_score")
+    assert_equal 100, result.fetch("score")
+    assert_equal 0, result.fetch("results").first.fetch("speed_bonus")
+    assert_equal false, result.fetch("results").first.fetch("timed_out")
+    assert_equal 15, result.fetch("duration_seconds")
   end
 
-  test "speed scoring supports a separate bonus cap and equal times earn equal points" do
+  test "live speed scoring honors its bonus cap and gives equal-time answers equal points" do
     definition = question_definition(time_limit_seconds: 10).merge(
       points: 1,
       speed_bonus_points: 500
@@ -425,34 +468,37 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     activity_id = create_activity(questions: [ definition ])
     publication = publish_activity(activity_id)
     question = publication_question(publication)
-    sessions = []
-
+    room_code = create_game_room(activity_id)
+    sessions = 2.times.map { |index| join_game_room(room_code:, name: "Learner #{index + 1}") }
     start_time = Time.current
-    travel_to(start_time) do
-      2.times do |index|
-        start_play_session(share_code: publication.fetch("share_code"), name: "Learner #{index + 1}")
-        assert_response :created
-        sessions << response.parsed_body.dig("data", "id")
-      end
-    end
+    travel_to(start_time, with_usec: true) { start_game_room(room_code:) }
 
-    travel_to(start_time + 5.seconds) do
-      results = sessions.map do |session_id|
-        answer_question(
-          share_code: publication.fetch("share_code"),
+    travel_to(start_time + 5.seconds, with_usec: true) do
+      answers = sessions.map do |session_id|
+        answer_game_room(
+          room_code:,
           session_id:,
           question_id: question.fetch("id"),
           option_id: question.fetch("options")[0].fetch("id")
         )
         assert_response :success
-        response.parsed_body.dig("data", "attempt")
+        response.parsed_body.fetch("data")
       end
-      assert_equal [ 251, 251 ], results.map { |result| result.fetch("score") }
-      assert_equal [ 501, 501 ], results.map { |result| result.fetch("max_score") }
-      assert_equal [ 250, 250 ],
-        results.map { |result| result.fetch("results").first.fetch("speed_bonus") }
-      assert_equal [ 251, 251 ],
-        results.map { |result| result.fetch("results").first.fetch("points_awarded") }
+      assert_equal [ 251, 251 ], answers.map { |answer| answer.fetch("points_awarded") }
+      assert_equal [ 250, 250 ], answers.map { |answer| answer.fetch("speed_bonus") }
+
+      post "/api/v1/game_rooms/#{room_code}/advance",
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      room_result = response.parsed_body.fetch("data")
+      assert_equal 5, room_result.fetch("duration_seconds")
+
+      attempts = Attempt.where(game_room_id: GameRoom.find_by!(room_code: room_code).id).order(:learner_name)
+      assert_equal [ 251, 251 ], attempts.map(&:score)
+      assert_equal [ 501, 501 ], attempts.map(&:max_score)
+      assert_equal [ start_time, start_time ], attempts.map(&:started_at)
+      assert_equal [ 5_000, 5_000 ], attempts.map(&:total_response_time_ms)
     end
   end
 
@@ -551,7 +597,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_operator response.parsed_body.dig("data", "points_awarded"), :>, 100
     get "/api/v1/game_rooms/#{room_code}"
     assert_response :success
-    assert_equal true, response.parsed_body.dig("data", "participants", 0, "answered")
+    assert_equal true, response.parsed_body.dig("data", "participants").any? { |participant| participant.fetch("answered") }
 
     post "/api/v1/game_rooms/#{room_code}/advance",
       headers: { "X-CSRF-Token" => fetch_csrf_token },
@@ -564,6 +610,101 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 1, Attempt.where(game_room_id: attempt.game_room_id).count
     assert_equal definition.fetch(:correct_option_ids).sort, attempt.responses.first.fetch("option_ids").sort
     assert_operator attempt.score, :>, 100
+  end
+
+  test "host navigation preserves answer locks and previously started question timers" do
+    activity_id = create_activity(
+      questions: [
+        question_definition(prompt: "Alpha"),
+        question_definition(prompt: "Bravo"),
+        question_definition(prompt: "Charlie")
+      ],
+      speed_scoring: false
+    )
+    publication = publish_activity(activity_id)
+    questions = publication_questions(publication)
+    room_code = create_game_room(activity_id)
+    session_id = join_game_room(room_code:, name: "Jordan")
+    join_game_room(room_code:, name: "Jordan")
+    start_time = Time.current
+
+    started_room = travel_to(start_time, with_usec: true) { start_game_room(room_code:) }
+    participant_keys = started_room.fetch("standings").map { |entry| entry.fetch("participant_key") }
+    assert_equal 2, participant_keys.uniq.length
+    public_standings = Activities::Serializers::GameRoomSerializer
+      .call(GameRoom.find_by!(room_code:))
+      .fetch(:standings)
+    refute public_standings.first.key?(:participant_key)
+    travel_to(start_time + 4.seconds, with_usec: true) do
+      answer_game_room(
+        room_code:,
+        session_id:,
+        question_id: questions[0].fetch("id"),
+        option_id: questions[0].fetch("options")[0].fetch("id")
+      )
+      assert_response :success
+    end
+
+    travel_to(start_time + 8.seconds, with_usec: true) do
+      post "/api/v1/game_rooms/#{room_code}/advance",
+        params: { question_index: 2 },
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal 2, response.parsed_body.dig("data", "question_index")
+      assert_equal 30, response.parsed_body.dig("data", "time_remaining_seconds").round
+    end
+
+    travel_to(start_time + 12.seconds, with_usec: true) do
+      post "/api/v1/game_rooms/#{room_code}/advance",
+        params: { question_index: 0 },
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal 0, response.parsed_body.dig("data", "question_index")
+      assert_equal 18, response.parsed_body.dig("data", "time_remaining_seconds").round
+      assert_equal true,
+        response.parsed_body.dig("data", "participants").any? { |participant| participant.fetch("answered") }
+
+      answer_game_room(
+        room_code:,
+        session_id:,
+        question_id: questions[0].fetch("id"),
+        option_id: questions[0].fetch("options")[1].fetch("id")
+      )
+      assert_response :unprocessable_entity
+      assert_equal "invalid_answer", response.parsed_body.dig("error", "code")
+    end
+
+    travel_to(start_time + 15.seconds, with_usec: true) do
+      post "/api/v1/game_rooms/#{room_code}/advance",
+        params: { question_index: 2 },
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal 23, response.parsed_body.dig("data", "time_remaining_seconds").round
+
+      post "/api/v1/game_rooms/#{room_code}/advance",
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal "completed", response.parsed_body.dig("data", "status")
+      game_room_id = GameRoom.find_by!(room_code:).id
+      attempt = Attempt.find_by!(game_room_id:)
+      assert_equal [ 0, 100 ], Attempt.where(game_room_id:).pluck(:score).sort
+      assert_equal 3, attempt.responses.length
+      scores_by_question = attempt.responses.to_h do |result|
+        [ result.fetch("question_id"), result.fetch("points_awarded") ]
+      end
+      assert_equal(
+        {
+          questions[0].fetch("id") => 100,
+          questions[1].fetch("id") => 0,
+          questions[2].fetch("id") => 0
+        },
+        scores_by_question
+      )
+    end
   end
 
   test "join links resolve both live rooms and self-paced activities" do
@@ -671,44 +812,30 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 1, Attempt.count
   end
 
-  test "expired questions record no answer and score zero" do
-    activity_id = create_activity(
-      questions: [
-        question_definition(time_limit_seconds: 5),
-        question_definition(prompt: "Which planet is closest to the Sun?", correct_index: 1, time_limit_seconds: 0)
-      ]
-    )
+  test "participant-paced questions remain answerable after the configured live timer" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 5) ])
     publication = publish_activity(activity_id)
-    questions = publication_questions(publication)
+    question = publication_question(publication)
     session = start_session(publication.fetch("share_code"))
+    started_at = PlaySession.find(session.fetch("id")).created_at
 
-    travel 6.seconds do
+    travel_to(started_at + 6.seconds, with_usec: true) do
       answer_question(
         share_code: publication.fetch("share_code"),
         session_id: session.fetch("id"),
-        question_id: questions[0].fetch("id"),
-        option_id: questions[0].fetch("options")[0].fetch("id")
+        question_id: question.fetch("id"),
+        option_id: question.fetch("options")[0].fetch("id")
       )
+      assert_response :success
+      result = response.parsed_body.fetch("data").fetch("attempt")
+      assert_equal false, result.fetch("results").first.fetch("timed_out")
+      assert_equal 100, result.fetch("score")
+      assert_equal 100, result.fetch("max_score")
+      assert_equal 6, result.fetch("duration_seconds")
     end
-
-    assert_response :success
-    assert_equal true, response.parsed_body.dig("data", "timed_out")
-    assert_equal false, response.parsed_body.dig("data", "is_correct")
-
-    answer_question(
-      share_code: publication.fetch("share_code"),
-      session_id: session.fetch("id"),
-      question_id: questions[1].fetch("id"),
-      option_id: questions[1].fetch("options")[1].fetch("id")
-    )
-    assert_response :success
-    result = response.parsed_body.fetch("data").fetch("attempt")
-    assert_equal 100, result.fetch("score")
-    assert_equal true, result.fetch("results").first.fetch("timed_out")
-    assert_nil result.fetch("results").first.fetch("selected_option_id")
   end
 
-  test "expired multiple-select questions record an empty answer set and score zero" do
+  test "participant-paced multiple-select questions have no per-question deadline" do
     definition = question_definition(time_limit_seconds: 5)
     correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
     activity_id = create_activity(
@@ -723,25 +850,26 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     question = publication_question(publication)
     session = start_session(publication.fetch("share_code"))
 
-    travel 6.seconds do
+    started_at = PlaySession.find(session.fetch("id")).created_at
+    travel_to(started_at + 6.seconds) do
       answer_multiple_question(
         share_code: publication.fetch("share_code"),
         session_id: session.fetch("id"),
         question_id: question.fetch("id"),
-        option_ids: []
+        option_ids: correct_option_ids
       )
+      assert_response :success
+      data = response.parsed_body.fetch("data")
+      result = data.fetch("attempt").fetch("results").first
+      assert_equal false, data.fetch("timed_out")
+      assert_equal correct_option_ids.sort, result.fetch("selected_option_ids").sort
+      assert_equal true, result.fetch("correct")
+      assert_equal 100, data.dig("attempt", "score")
+      assert_equal 0, result.fetch("speed_bonus")
     end
-
-    assert_response :success
-    data = response.parsed_body.fetch("data")
-    assert_equal true, data.fetch("timed_out")
-    result = data.fetch("attempt").fetch("results").first
-    assert_equal [], result.fetch("selected_option_ids")
-    assert_equal false, result.fetch("correct")
-    assert_equal 0, data.dig("attempt", "score")
   end
 
-  test "a learner cannot skip a timed question before its deadline" do
+  test "a learner cannot skip a participant-paced question without answering" do
     activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 30) ])
     publication = publish_activity(activity_id)
     question = publication_question(publication)
@@ -759,8 +887,8 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 0, Attempt.count
   end
 
-  test "untimed questions remain available beyond five minutes" do
-    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 0) ])
+  test "participant-paced questions remain available beyond five minutes" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 5) ])
     publication = publish_activity(activity_id)
     question = publication_question(publication)
     session = start_session(publication.fetch("share_code"))
@@ -813,13 +941,26 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 0, Activity.count
   end
 
+  test "rejects a zero question timer because timing is selected by play mode" do
+    definition = question_definition(time_limit_seconds: 0)
+    post "/api/v1/activities",
+      params: { activity: { title: "Untimed timer", questions: [ definition ] } },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+
+    assert_response :unprocessable_entity
+    assert_equal "validation_failed", response.parsed_body.dig("error", "code")
+    assert_equal 0, Activity.count
+  end
+
   test "questions default to thirty seconds when no time limit is provided" do
     definition = question_definition.except(:time_limit_seconds)
     activity_id = create_activity(questions: [ definition ])
-    publication = publish_activity(activity_id)
-    question = publication_question(publication)
+    publish_activity(activity_id)
 
-    assert_equal 30, question.fetch("time_limit_seconds")
+    get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
+    assert_response :success
+    assert_equal 30, response.parsed_body.dig("data", "questions", 0, "time_limit_seconds")
   end
 
   test "does not publish a question with an unknown correct option" do
