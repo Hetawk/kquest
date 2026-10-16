@@ -1,8 +1,92 @@
 module Api
   module V1
     class ActivitiesController < ApplicationController
-      before_action :prototype_api_only?
       before_action :require_current_user
+
+      def index
+        return unless current_user
+
+        activities = current_user.activities
+          .includes(:questions, :activity_versions)
+          .order(updated_at: :desc)
+          .limit(100)
+        plays_by_activity = Attempt.joins(activity_version: :activity)
+          .where(activities: { user_id: current_user.id })
+          .group("activities.id")
+          .count
+        total_activities = current_user.activities.count
+        published_activities = current_user.activities.where(status: "published").count
+        serialized_activities = activities.map do |activity|
+          latest_version = activity.activity_versions.max_by(&:version_number)
+          {
+            id: activity.id,
+            title: activity.title,
+            description: activity.description,
+            status: activity.status,
+            question_count: activity.questions.size,
+            share_code: latest_version&.share_code,
+            version: latest_version&.version_number,
+            total_plays: plays_by_activity.fetch(activity.id, 0),
+            updated_at: activity.updated_at.iso8601,
+            published_at: latest_version&.published_at&.iso8601
+          }
+        end
+
+        render json: {
+          data: {
+            activities: serialized_activities,
+            summary: {
+              total: total_activities,
+              published: published_activities,
+              plays: plays_by_activity.values.sum
+            }
+          }
+        }
+      end
+
+      def show
+        return unless current_user
+
+        activity = current_user.activities
+          .includes(:questions, :activity_versions)
+          .find_by(id: params[:id])
+        return render_not_found unless activity
+
+        latest_version = activity.activity_versions.max_by(&:version_number)
+        total_plays = Attempt.joins(activity_version: :activity)
+          .where(activities: { id: activity.id })
+          .count
+
+        render json: {
+          data: {
+            id: activity.id,
+            title: activity.title,
+            description: activity.description,
+            status: activity.status,
+            question_count: activity.questions.size,
+            share_code: latest_version&.share_code,
+            version: latest_version&.version_number,
+            total_plays:,
+            updated_at: activity.updated_at.iso8601,
+            published_at: latest_version&.published_at&.iso8601,
+            shuffle_questions: activity.shuffle_questions?,
+            speed_scoring: activity.speed_scoring?,
+            questions: activity.questions.map do |question|
+              {
+                id: question.id,
+                position: question.position,
+                question_type: question.question_type,
+                prompt: question.prompt,
+                options: question.options,
+                correct_option_id: question.correct_option_id,
+                correct_option_ids: question.correct_option_ids,
+                points: question.points,
+                time_limit_seconds: question.time_limit_seconds
+              }
+            end
+          }
+        }
+      end
 
       def create
         return unless current_user
@@ -13,7 +97,14 @@ module Api
           :cover_image_asset_id,
           :shuffle_questions,
           :speed_scoring,
-          questions: [ :prompt, :correct_option_id, :points, :time_limit_seconds, { options: [ :id, :text ] } ]
+          questions: [
+            :question_type,
+            :prompt,
+            :correct_option_id,
+            :points,
+            :time_limit_seconds,
+            { correct_option_ids: [], options: [ :id, :text ] }
+          ]
         )
         question_definitions = attributes.delete(:questions) || []
         asset_id = attributes.delete(:cover_image_asset_id)
@@ -34,12 +125,15 @@ module Api
           speed_scoring: attributes[:speed_scoring].nil? || ActiveModel::Type::Boolean.new.cast(attributes[:speed_scoring])
         )
         question_definitions.each_with_index do |definition, index|
+          question_type = definition[:question_type].presence || "single_choice"
+          correct_option_ids = definition[:correct_option_ids] || []
           activity.questions.build(
             position: index + 1,
-            question_type: "single_choice",
+            question_type:,
             prompt: definition[:prompt],
             options: definition[:options]&.map(&:to_h),
-            correct_option_id: definition[:correct_option_id],
+            correct_option_id: definition[:correct_option_id] || correct_option_ids.first,
+            correct_option_ids:,
             points: definition[:points],
             time_limit_seconds: definition[:time_limit_seconds] ||
               Questions::Types::SingleChoice::DEFAULT_TIME_LIMIT_SECONDS

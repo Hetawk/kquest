@@ -17,12 +17,11 @@ module Assessments
         snapshots = activity_version.question_snapshot
         score = snapshots.sum do |question|
           response = normalized_responses.find { |item| item.fetch("question_id") == question.fetch("id") }
-          response.fetch("points_awarded") || Questions::Types::SingleChoice.score(
-            question: question,
-            selected_option_id: response["option_id"]
-          )
+          response.fetch("points_awarded")
         end
-        max_score = snapshots.sum { |question| Questions::Types::SingleChoice.maximum_points(question) }
+        max_score = snapshots.sum do |question|
+          Questions::Types::SingleChoice.maximum_points(question)
+        end
 
         attempt = Attempt.create!(
           activity_version: activity_version,
@@ -51,20 +50,47 @@ module Assessments
 
           question_id = response["question_id"]
           option_id = response["option_id"]
+          option_ids = response["option_ids"]
           question = snapshots.find { |item| item.fetch("id") == question_id }
           raise InvalidResponses unless question
-          raise InvalidResponses if option_id && !question.fetch("options").any? { |option| option.fetch("id") == option_id }
+          multiple_select = question.fetch("question_type", "single_choice") == "multiple_select"
+          available_option_ids = question.fetch("options").map { |option| option.fetch("id") }
+          if multiple_select
+            raise InvalidResponses unless option_id.nil? && option_ids.is_a?(Array)
+            raise InvalidResponses unless option_ids.all? { |id| id.is_a?(String) }
+            raise InvalidResponses unless option_ids.uniq.length == option_ids.length
+            raise InvalidResponses if (option_ids - available_option_ids).any?
+          else
+            raise InvalidResponses unless option_ids.nil?
+            raise InvalidResponses if option_id && !available_option_ids.include?(option_id)
+          end
 
           response_time_ms = response["response_time_ms"]
           if response_time_ms && (!response_time_ms.is_a?(Integer) || response_time_ms.negative?)
             raise InvalidResponses
           end
-          award = if option_id && response_time_ms
+          selected = multiple_select ? option_ids : option_id
+          answered = multiple_select ? option_ids.any? : option_id.present?
+          award = if answered && response_time_ms && multiple_select
+            Questions::Types::MultipleSelect.score_with_speed(
+              question: question,
+              selected_option_ids: option_ids,
+              elapsed_seconds: response_time_ms / 1000.0
+            )
+          elsif answered && response_time_ms
             Questions::Types::SingleChoice.score_with_speed(
               question: question,
               selected_option_id: option_id,
               elapsed_seconds: response_time_ms / 1000.0
             )
+          elsif multiple_select
+            {
+              points_awarded: Questions::Types::MultipleSelect.score(
+                question: question,
+                selected_option_ids: option_ids
+              ),
+              speed_bonus: 0
+            }
           else
             {
               points_awarded: Questions::Types::SingleChoice.score(
@@ -76,10 +102,14 @@ module Assessments
           end
           normalized_response = {
             "question_id" => question_id,
-            "option_id" => option_id,
             "points_awarded" => award.fetch(:points_awarded),
             "speed_bonus" => award.fetch(:speed_bonus)
           }
+          if multiple_select
+            normalized_response["option_ids"] = selected.sort
+          else
+            normalized_response["option_id"] = selected
+          end
           normalized_response["response_time_ms"] = response_time_ms if response_time_ms
           normalized_response["answered_at"] = response["answered_at"] if response["answered_at"]
           normalized_response

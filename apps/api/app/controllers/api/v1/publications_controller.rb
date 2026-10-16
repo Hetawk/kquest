@@ -1,7 +1,6 @@
 module Api
   module V1
     class PublicationsController < ApplicationController
-      before_action :prototype_api_only?
       before_action :require_current_user
 
       def create

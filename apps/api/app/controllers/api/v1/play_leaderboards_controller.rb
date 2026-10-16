@@ -1,8 +1,6 @@
 module Api
   module V1
     class PlayLeaderboardsController < ApplicationController
-      before_action :prototype_api_only?
-
       def show
         activity_version = ActivityVersion.find_by(share_code: normalized_share_code)
         return render_not_found unless activity_version

@@ -80,6 +80,13 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       as: :json
   end
 
+  def answer_multiple_question(share_code:, session_id:, question_id:, option_ids:, key: SecureRandom.uuid)
+    post "/api/v1/play/#{share_code}/sessions/#{session_id}/answers",
+      params: { answer: { question_id: question_id, option_ids: option_ids } },
+      headers: { "Idempotency-Key" => key, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+  end
+
   def fetch_csrf_token
     get "/api/v1/auth/csrf", as: :json
     response.parsed_body.dig("data", "token")
@@ -138,6 +145,109 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 300, result.fetch("max_score")
     assert_equal false, result.fetch("results").first.fetch("timed_out")
     assert_equal 1, Attempt.count
+  end
+
+  test "lists only the signed-in creator's quests with publication and play summaries" do
+    activity_id = create_activity
+    publication = publish_activity(activity_id)
+    stranger = User.create!(
+      email: "another-educator@example.test",
+      name: "Another Educator",
+      google_uid: "another-google-user"
+    )
+    stranger.activities.create!(title: "Private quest")
+
+    get "/api/v1/activities", headers: { "Accept" => "application/json" }
+
+    assert_response :success
+    data = response.parsed_body.fetch("data")
+    assert_equal({ "total" => 1, "published" => 1, "plays" => 0 }, data.fetch("summary"))
+    assert_equal 1, data.fetch("activities").length
+    activity = data.fetch("activities").first
+    assert_equal activity_id, activity.fetch("id")
+    assert_equal publication.fetch("share_code"), activity.fetch("share_code")
+    assert_equal 1, activity.fetch("version")
+    assert_equal 1, activity.fetch("question_count")
+    refute_equal stranger.activities.first.id, activity.fetch("id")
+
+    get "/api/v1/activities/#{stranger.activities.first.id}", headers: { "Accept" => "application/json" }
+    assert_response :not_found
+  end
+
+  test "publishes and scores a multiple-select question without exposing its answer key to learners" do
+    definition = question_definition(time_limit_seconds: 0)
+    correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
+    activity_id = create_activity(
+      questions: [
+        definition.merge(
+          question_type: "multiple_select",
+          correct_option_ids: correct_option_ids
+        )
+      ]
+    )
+    publication = publish_activity(activity_id)
+    get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
+
+    assert_response :success
+    creator_question = response.parsed_body.dig("data", "questions", 0)
+    assert_equal "multiple_select", creator_question.fetch("question_type")
+    assert_equal correct_option_ids, creator_question.fetch("correct_option_ids")
+
+    get "/api/v1/play/#{publication.fetch("share_code")}"
+    assert_response :success
+    public_question = response.parsed_body.dig("data", "questions", 0)
+    assert_equal "multiple_select", public_question.fetch("question_type")
+    refute_includes response.body, "correct_option_ids"
+
+    start_play_session(share_code: publication.fetch("share_code"))
+    session = response.parsed_body.dig("data", "id")
+    question_id = public_question.fetch("id")
+    answer_multiple_question(
+      share_code: publication.fetch("share_code"),
+      session_id: session,
+      question_id: question_id,
+      option_ids: correct_option_ids
+    )
+
+    assert_response :success
+    result = response.parsed_body.dig("data", "attempt", "results", 0)
+    assert_equal true, result.fetch("correct")
+    assert_equal correct_option_ids.sort, result.fetch("selected_option_ids").sort
+    assert_equal correct_option_ids.sort, result.fetch("correct_option_ids").sort
+    assert_equal 100, response.parsed_body.dig("data", "attempt", "score")
+  end
+
+  test "rejects duplicate and unavailable multiple-select answers" do
+    definition = question_definition(time_limit_seconds: 0)
+    correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
+    activity_id = create_activity(
+      questions: [
+        definition.merge(
+          question_type: "multiple_select",
+          correct_option_ids: correct_option_ids
+        )
+      ]
+    )
+    publication = publish_activity(activity_id)
+    question = publication_question(publication)
+    session = start_session(publication.fetch("share_code"))
+
+    answer_multiple_question(
+      share_code: publication.fetch("share_code"),
+      session_id: session.fetch("id"),
+      question_id: question.fetch("id"),
+      option_ids: [ correct_option_ids.first, correct_option_ids.first ]
+    )
+    assert_response :unprocessable_entity
+
+    answer_multiple_question(
+      share_code: publication.fetch("share_code"),
+      session_id: session.fetch("id"),
+      question_id: question.fetch("id"),
+      option_ids: [ "10101010-1010-4101-8101-101010101099" ]
+    )
+    assert_response :unprocessable_entity
+    assert_equal 0, Attempt.count
   end
 
   test "speed scoring awards a server-measured proportional bonus and caps the maximum" do
@@ -202,7 +312,12 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
   end
 
   test "host-paced rooms synchronize participants and publish a finalized podium" do
-    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
+    definition = question_definition(time_limit_seconds: 10)
+    definition = definition.merge(
+      question_type: "multiple_select",
+      correct_option_ids: [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
+    )
+    activity_id = create_activity(questions: [ definition ])
     publication = publish_activity(activity_id)
     post "/api/v1/activities/#{activity_id}/game_rooms",
       headers: { "X-CSRF-Token" => fetch_csrf_token },
@@ -237,7 +352,12 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
 
     question = publication_question(publication)
     post "/api/v1/game_rooms/#{room_code}/participants/#{session_id}/answers",
-      params: { answer: { question_id: question.fetch("id"), option_id: question.fetch("options")[0].fetch("id") } },
+      params: {
+        answer: {
+          question_id: question.fetch("id"),
+          option_ids: definition.fetch(:correct_option_ids)
+        }
+      },
       headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
       as: :json
     assert_response :success
@@ -250,7 +370,10 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal "completed", response.parsed_body.dig("data", "status")
     assert_equal true, response.parsed_body.dig("data", "standings_final")
     assert_equal "Jordan Updated", response.parsed_body.dig("data", "podium", 0, "learner_name")
-    assert_equal 1, Attempt.where(game_room_id: GameRoom.find_by!(room_code: room_code).id).count
+    attempt = Attempt.find_by!(game_room_id: GameRoom.find_by!(room_code: room_code).id)
+    assert_equal 1, Attempt.where(game_room_id: attempt.game_room_id).count
+    assert_equal definition.fetch(:correct_option_ids).sort, attempt.responses.first.fetch("option_ids").sort
+    assert_operator attempt.score, :>, 100
   end
 
   test "join links resolve both live rooms and self-paced activities" do
@@ -393,6 +516,39 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 100, result.fetch("score")
     assert_equal true, result.fetch("results").first.fetch("timed_out")
     assert_nil result.fetch("results").first.fetch("selected_option_id")
+  end
+
+  test "expired multiple-select questions record an empty answer set and score zero" do
+    definition = question_definition(time_limit_seconds: 5)
+    correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]
+    activity_id = create_activity(
+      questions: [
+        definition.merge(
+          question_type: "multiple_select",
+          correct_option_ids: correct_option_ids
+        )
+      ]
+    )
+    publication = publish_activity(activity_id)
+    question = publication_question(publication)
+    session = start_session(publication.fetch("share_code"))
+
+    travel 6.seconds do
+      answer_multiple_question(
+        share_code: publication.fetch("share_code"),
+        session_id: session.fetch("id"),
+        question_id: question.fetch("id"),
+        option_ids: []
+      )
+    end
+
+    assert_response :success
+    data = response.parsed_body.fetch("data")
+    assert_equal true, data.fetch("timed_out")
+    result = data.fetch("attempt").fetch("results").first
+    assert_equal [], result.fetch("selected_option_ids")
+    assert_equal false, result.fetch("correct")
+    assert_equal 0, data.dig("attempt", "score")
   end
 
   test "a learner cannot skip a timed question before its deadline" do

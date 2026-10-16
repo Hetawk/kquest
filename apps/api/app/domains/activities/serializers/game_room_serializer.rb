@@ -24,6 +24,7 @@ module Activities
           current_question: current_question && {
             id: current_question.fetch("id"),
             prompt: current_question.fetch("prompt"),
+            question_type: current_question.fetch("question_type", "single_choice"),
             points: current_question.fetch("points"),
             speed_scoring: current_question.fetch("speed_scoring", false),
             time_limit_seconds: current_question.fetch(

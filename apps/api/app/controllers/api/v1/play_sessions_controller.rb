@@ -2,8 +2,6 @@ module Api
   module V1
     class PlaySessionsController < ApplicationController
       def create
-        return unless prototype_api_only?
-
         activity_version = ActivityVersion.includes(:activity).find_by(share_code: normalized_share_code)
         return render_not_found unless activity_version
 
@@ -46,8 +44,6 @@ module Api
       end
 
       def update
-        return unless prototype_api_only?
-
         activity_version = ActivityVersion.find_by(share_code: normalized_share_code)
         return render_not_found unless activity_version
 

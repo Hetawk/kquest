@@ -799,6 +799,20 @@ Educators must be able to:
 - Assign published versions.
 - Reuse existing questions where permitted.
 
+The authenticated dashboard is the educator's home after sign-in. It must
+provide a searchable quest library and a dedicated workspace for each quest,
+including publication and play summaries, preview/share actions, live-session
+launch, and an ordered question review. Opening a question in the authoring
+workspace must focus a complete question-detail editor with its answer choices,
+correct-answer selection, points, and timing controls. Reordering questions
+must preserve question identity and be keyboard and screen-reader accessible.
+
+Published versions are immutable. "Copy and edit" creates a separately
+editable activity from the selected version; it must not mutate the questions
+or answer key used by existing share codes. There is no subscription-plan
+ceiling on the number of quests or participants. Apply technical safeguards
+for request size and service capacity separately from product quotas.
+
 The content domain owns content lifecycle and versioning. It should not own the live-session lifecycle or implement scoring independently.
 
 ### 8.3 Question engine
@@ -813,7 +827,11 @@ Exactly one option may be selected.
 
 2\. Multiple select
 
-One or more options may be selected, with configurable scoring.
+One or more options may be selected, with configurable scoring. The initial
+release awards full credit only when the selected set exactly matches the
+answer key; partial credit is not implied. Both response validation and
+scoring are authoritative on the server, and public learner payloads never
+include the answer key.
 
 3\. True or false
 
@@ -1233,6 +1251,12 @@ Build shared components for:
 - Timers, leaderboards, and session status.
 
 The shared UI layer should handle presentation and accessibility. It should not know how a particular question is graded.
+
+Client-side route changes must display an unobtrusive, branded loading
+indicator, while routes that fetch substantial data show skeleton or
+task-specific loading states. Keep status text available to assistive
+technology, respect reduced-motion preferences, and avoid loading animations
+that block interaction after the destination is ready.
 
 ### 12.3 Brand and motion tokens
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { answerPlayQuestion, fetchActivity, startPlaySession } from './api';
+import { answerPlayQuestion, fetchActivity, listCreatorActivities, startPlaySession } from './api';
 
 function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
@@ -123,17 +123,68 @@ describe('learning journey API client', () => {
 		);
 	});
 
+	it('posts multiple selected answer identifiers together', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ data: { token: 'csrf-token' } }))
+			.mockResolvedValueOnce(jsonResponse({ data: { complete: false } }));
+		vi.stubGlobal('fetch', fetchMock);
+
+		await answerPlayQuestion({
+			shareCode: 'ABCD23',
+			sessionId: 'session-id',
+			questionId: 'question-id',
+			optionIds: ['option-a', 'option-c'],
+			idempotencyKey: '00000000-0000-4000-8000-000000000003'
+		});
+
+		const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+		expect(init.body).toBe(
+			JSON.stringify({
+				answer: { question_id: 'question-id', option_ids: ['option-a', 'option-c'] }
+			})
+		);
+	});
+
 	it('surfaces structured API errors for the learner', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn().mockResolvedValue(
-				new Response(JSON.stringify({ error: { message: 'That game code has expired.' } }), {
-					status: 404,
-					headers: { 'Content-Type': 'application/json' }
-				})
+				new Response(
+					JSON.stringify({ error: { code: 'not_found', message: 'That game code has expired.' } }),
+					{
+						status: 404,
+						headers: { 'Content-Type': 'application/json' }
+					}
+				)
 			)
 		);
 
-		await expect(fetchActivity('AAAAAAAAAAAA')).rejects.toThrow('That game code has expired.');
+		await expect(fetchActivity('AAAAAAAAAAAA')).rejects.toMatchObject({
+			message: 'That game code has expired.',
+			status: 404,
+			code: 'not_found'
+		});
+	});
+
+	it('loads the authenticated creator quest summaries', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			jsonResponse({
+				data: {
+					activities: [],
+					summary: { total: 0, published: 0, plays: 0 }
+				}
+			})
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expect(listCreatorActivities()).resolves.toEqual({
+			activities: [],
+			summary: { total: 0, published: 0, plays: 0 }
+		});
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/v1/activities',
+			expect.objectContaining({ credentials: 'same-origin' })
+		);
 	});
 });

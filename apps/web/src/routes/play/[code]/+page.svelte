@@ -23,7 +23,7 @@
 	let leaderboard = $state<PlayLeaderboard | null>(null);
 	let learnerName = $state('');
 	let currentQuestion = $state(0);
-	let selectedOptionId = $state('');
+	let selectedOptionIds = $state<string[]>([]);
 	let loading = $state(true);
 	let submitting = $state(false);
 	let starting = $state(false);
@@ -36,7 +36,7 @@
 	let feedbackMessage = $state('');
 	let editingName = $state(false);
 	let savingName = $state(false);
-	let pendingOptionId = $state<string | null | undefined>(undefined);
+	let pendingOptionIds = $state<string[] | undefined>(undefined);
 	let sessionStartKey = $state('');
 	let sessionLearnerName = '';
 	let answerRequestKey = '';
@@ -58,11 +58,11 @@
 			}
 			if (
 				remaining === 0 &&
-				pendingOptionId === undefined &&
+				pendingOptionIds === undefined &&
 				timeoutSubmittedForIndex !== currentQuestion
 			) {
 				timeoutSubmittedForIndex = currentQuestion;
-				void submitAnswer(null);
+				void submitAnswer([]);
 			}
 		}, 200);
 		const leaderboardTimer = window.setInterval(() => {
@@ -151,10 +151,10 @@
 		}
 	}
 
-	async function submitAnswer(optionId: string | null) {
+	async function submitAnswer(optionIds: string[]) {
 		if (!activity || !current || !playSessionId || submitting || attempt) return;
-		const submittedOptionId = pendingOptionId === undefined ? optionId : pendingOptionId;
-		pendingOptionId = submittedOptionId;
+		const submittedOptionIds = pendingOptionIds === undefined ? optionIds : pendingOptionIds;
+		pendingOptionIds = submittedOptionIds;
 		submitting = true;
 		error = '';
 		const requestStartedAt = performance.now();
@@ -164,7 +164,9 @@
 				shareCode: activity.share_code,
 				sessionId: playSessionId,
 				questionId: current.id,
-				optionId: submittedOptionId,
+				...(current.question_type === 'multiple_select'
+					? { optionIds: submittedOptionIds }
+					: { optionId: submittedOptionIds[0] ?? null }),
 				idempotencyKey: answerRequestKey
 			});
 			if (!progress.timed_out) gameAudio?.playAnswerCue(progress.is_correct);
@@ -187,7 +189,7 @@
 					});
 			} else {
 				currentQuestion = progress.question_index;
-				selectedOptionId = '';
+				selectedOptionIds = [];
 				setQuestionClock(
 					progress.time_limit_seconds,
 					progress.time_limit_seconds,
@@ -195,7 +197,7 @@
 				);
 			}
 
-			pendingOptionId = undefined;
+			pendingOptionIds = undefined;
 			answerRequestKey = '';
 			error = '';
 		} catch (cause) {
@@ -473,17 +475,31 @@
 
 			<fieldset
 				class="answer-options"
-				disabled={submitting || questionExpired || pendingOptionId !== undefined}
+				disabled={submitting || questionExpired || pendingOptionIds !== undefined}
 			>
-				<legend>Choose the answer that feels right.</legend>
+				<legend>
+					{current.question_type === 'multiple_select'
+						? 'Choose every answer that is correct.'
+						: 'Choose the answer that feels right.'}
+				</legend>
 				{#each current.options as option, optionIndex (option.id)}
-					<label class="answer-option" class:answer-selected={selectedOptionId === option.id}>
+					<label
+						class="answer-option"
+						class:answer-selected={selectedOptionIds.includes(option.id)}
+					>
 						<input
-							type="radio"
+							type={current.question_type === 'multiple_select' ? 'checkbox' : 'radio'}
 							name="answer-{current.id}"
 							value={option.id}
-							checked={selectedOptionId === option.id}
-							onchange={() => (selectedOptionId = option.id)}
+							checked={selectedOptionIds.includes(option.id)}
+							onchange={() => {
+								selectedOptionIds =
+									current.question_type === 'multiple_select'
+										? selectedOptionIds.includes(option.id)
+											? selectedOptionIds.filter((id) => id !== option.id)
+											: [...selectedOptionIds, option.id]
+										: [option.id];
+							}}
 						/>
 						<span class="answer-letter" aria-hidden="true"
 							>{String.fromCharCode(65 + optionIndex)}</span
@@ -507,12 +523,12 @@
 					class="button button-primary"
 					type="button"
 					disabled={submitting ||
-						(pendingOptionId === undefined && (!selectedOptionId || questionExpired))}
-					onclick={() => submitAnswer(selectedOptionId || null)}
+						(pendingOptionIds === undefined && (!selectedOptionIds.length || questionExpired))}
+					onclick={() => submitAnswer(selectedOptionIds)}
 				>
 					{submitting
 						? 'Saving your answer…'
-						: pendingOptionId !== undefined
+						: pendingOptionIds !== undefined
 							? 'Retry answer'
 							: currentQuestion === activity.questions.length - 1
 								? 'Finish quest'
@@ -522,7 +538,7 @@
 						>{/if}
 				</button>
 			</div>
-			{#if pendingOptionId !== undefined && error}
+			{#if pendingOptionIds !== undefined && error}
 				<p class="retry-note">Your response can be safely retried without advancing twice.</p>
 			{/if}
 		</section>

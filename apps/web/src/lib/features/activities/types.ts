@@ -4,9 +4,12 @@ export type ChoiceOption = {
 };
 
 export type QuestionDraft = {
+	client_id?: string;
+	question_type: 'single_choice' | 'multiple_select';
 	prompt: string;
 	options: ChoiceOption[];
 	correct_option_id: string;
+	correct_option_ids: string[];
 	points: number;
 	time_limit_seconds: number;
 };
@@ -14,6 +17,7 @@ export type QuestionDraft = {
 export type PlayQuestion = {
 	id: string;
 	prompt: string;
+	question_type?: 'single_choice' | 'multiple_select';
 	points: number;
 	time_limit_seconds: number;
 	speed_scoring: boolean;
@@ -31,8 +35,11 @@ export type PlayActivity = {
 export type QuestionResult = {
 	question_id: string;
 	prompt: string;
-	selected_option_id: string | null;
-	correct_option_id: string;
+	question_type?: 'single_choice' | 'multiple_select';
+	selected_option_id?: string | null;
+	correct_option_id?: string;
+	selected_option_ids?: string[];
+	correct_option_ids?: string[];
 	timed_out: boolean;
 	points_awarded: number;
 	base_points: number;

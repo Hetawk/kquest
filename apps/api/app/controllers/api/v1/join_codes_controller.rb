@@ -1,8 +1,6 @@
 module Api
   module V1
     class JoinCodesController < ApplicationController
-      before_action :prototype_api_only?
-
       def show
         code = params[:code].to_s.upcase
         return render_not_found unless ActivityVersion::CODE_REGEX.match?(code)

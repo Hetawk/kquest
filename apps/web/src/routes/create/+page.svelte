@@ -8,6 +8,7 @@
 	import {
 		createGameRoom,
 		createActivity,
+		getCreatorActivity,
 		getCurrentUser,
 		publishActivity,
 		uploadCoverImage
@@ -17,6 +18,8 @@
 	const makeQuestion = (): QuestionDraft => {
 		const firstOption = crypto.randomUUID();
 		return {
+			client_id: crypto.randomUUID(),
+			question_type: 'single_choice',
 			prompt: '',
 			options: [
 				{ id: firstOption, text: '' },
@@ -25,14 +28,17 @@
 				{ id: crypto.randomUUID(), text: '' }
 			],
 			correct_option_id: firstOption,
+			correct_option_ids: [firstOption],
 			points: 100,
 			time_limit_seconds: 30
 		};
 	};
 
+	const initialQuestion = makeQuestion();
 	let title = $state('');
 	let description = $state('');
-	let questions = $state<QuestionDraft[]>([makeQuestion()]);
+	let questions = $state<QuestionDraft[]>([initialQuestion]);
+	let selectedQuestionId = $state(initialQuestion.client_id ?? '');
 	let error = $state('');
 	let saving = $state(false);
 	let published = $state<PublishedActivity | null>(null);
@@ -46,23 +52,86 @@
 	let shuffleQuestions = $state(false);
 	let speedScoring = $state(true);
 	let gameMode = $state<'self_paced' | 'host_paced'>('self_paced');
+	let questionOrderNotice = $state('');
 	const maxQuestions = 100;
 
 	onMount(() => {
-		void getCurrentUser()
-			.then((user) => {
+		void (async () => {
+			try {
+				const user = await getCurrentUser();
 				signedIn = user !== null;
-			})
-			.catch((cause: unknown) => {
-				error = cause instanceof Error ? cause.message : 'Could not verify your sign-in.';
-			})
-			.finally(() => {
+				const copyId = new URL(window.location.href).searchParams.get('copy');
+				if (!user || !copyId) return;
+
+				const source = await getCreatorActivity(copyId);
+				title = `Copy of ${source.title}`;
+				description = source.description;
+				shuffleQuestions = source.shuffle_questions;
+				speedScoring = source.speed_scoring;
+				questions = source.questions.map((question) => {
+					const optionIds = new Map(
+						question.options.map((option) => [option.id, crypto.randomUUID()])
+					);
+					const correctOptionIds = (
+						question.correct_option_ids?.length
+							? question.correct_option_ids
+							: [question.correct_option_id]
+					).map((id) => optionIds.get(id) ?? '');
+					return {
+						client_id: crypto.randomUUID(),
+						question_type: question.question_type,
+						prompt: question.prompt,
+						options: question.options.map((option) => ({
+							id: optionIds.get(option.id) ?? crypto.randomUUID(),
+							text: option.text
+						})),
+						correct_option_id: correctOptionIds[0],
+						correct_option_ids: correctOptionIds,
+						points: question.points,
+						time_limit_seconds: question.time_limit_seconds
+					};
+				});
+				selectedQuestionId = questions[0]?.client_id ?? '';
+			} catch (cause: unknown) {
+				error = cause instanceof Error ? cause.message : 'Could not prepare the quest copy.';
+			} finally {
 				authChecking = false;
-			});
+			}
+		})();
 	});
+
+	const selectedQuestionIndex = $derived(
+		questions.findIndex((question) => question.client_id === selectedQuestionId)
+	);
+	const selectedQuestion = $derived(questions[selectedQuestionIndex] ?? questions[0]);
 
 	function updateQuestion(index: number, question: QuestionDraft) {
 		questions[index] = question;
+	}
+
+	function moveQuestion(index: number, direction: -1 | 1) {
+		const destination = index + direction;
+		if (destination < 0 || destination >= questions.length) return;
+
+		const reordered = [...questions];
+		[reordered[index], reordered[destination]] = [reordered[destination], reordered[index]];
+		questions = reordered;
+		questionOrderNotice = `Question moved to position ${destination + 1}.`;
+	}
+
+	function addQuestion() {
+		const question = makeQuestion();
+		questions = [...questions, question];
+		selectedQuestionId = question.client_id ?? '';
+	}
+
+	function removeQuestion(index: number) {
+		if (questions.length <= 1) return;
+		const wasSelected = questions[index]?.client_id === selectedQuestionId;
+		questions = questions.filter((_, itemIndex) => itemIndex !== index);
+		if (wasSelected) {
+			selectedQuestionId = questions[Math.max(index - 1, 0)]?.client_id ?? '';
+		}
 	}
 
 	async function handleSubmit(event: SubmitEvent) {
@@ -76,7 +145,11 @@
 			const activity = await createActivity({
 				title,
 				description,
-				questions,
+				questions: questions.map((question) => {
+					const payload = { ...question };
+					delete payload.client_id;
+					return payload;
+				}),
 				shuffle_questions: shuffleQuestions,
 				speed_scoring: speedScoring,
 				...(coverImage ? { cover_image_asset_id: coverImage.id } : {})
@@ -101,7 +174,12 @@
 			if (questions.length + imported.length > maxQuestions) {
 				throw new Error(`You can have up to ${maxQuestions} questions in a quest.`);
 			}
-			questions = [...questions, ...imported];
+			const additions = imported.map((question) => ({
+				...question,
+				client_id: crypto.randomUUID()
+			}));
+			questions = [...questions, ...additions];
+			selectedQuestionId = additions[0]?.client_id ?? selectedQuestionId;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'The question file could not be imported.';
 		} finally {
@@ -248,11 +326,11 @@
 				</button>
 			{/if}
 			{#if error}<p class="error-message" role="alert">{error}</p>{/if}
-			<a class="back-link" href={resolve('/')}>Back to your studio</a>
+			<a class="back-link" href={resolve('/dashboard')}>Back to your studio</a>
 		</section>
 	{:else}
 		<div class="create-intro">
-			<a class="back-link" href={resolve('/')}>← Back to studio</a>
+			<a class="back-link" href={resolve('/dashboard')}>← Back to studio</a>
 			<p class="eyebrow">The question studio</p>
 			<h1 class="page-heading">Make a little<br />room for wonder.</h1>
 			<p class="page-intro">
@@ -324,7 +402,10 @@
 					<span class="step-marker">02</span>
 					<div>
 						<h2 id="questions-heading">Bring the questions</h2>
-						<p>Add up to {maxQuestions} questions by hand or import and review a spreadsheet.</p>
+						<p>
+							Add up to {maxQuestions} questions by hand or import a spreadsheet. Use the arrows to set
+							the order.
+						</p>
 					</div>
 				</div>
 
@@ -351,27 +432,59 @@
 					/>
 				</div>
 
-				<div class="question-list">
-					{#each questions as question, index (index)}
-						<QuestionEditor
-							{question}
-							{index}
-							onUpdate={(updated) => updateQuestion(index, updated)}
-							onRemove={() => (questions = questions.filter((_, itemIndex) => itemIndex !== index))}
-						/>
-					{/each}
+				<div class="question-workspace">
+					<nav class="question-list" aria-label="Quest question list">
+						{#each questions as question, index (question.client_id)}
+							<button
+								type="button"
+								class="question-nav-item"
+								class:selected={question.client_id === selectedQuestionId}
+								aria-current={question.client_id === selectedQuestionId ? 'step' : undefined}
+								onclick={() => (selectedQuestionId = question.client_id ?? '')}
+							>
+								<span class="question-nav-number">{String(index + 1).padStart(2, '0')}</span>
+								<span class="question-nav-copy">
+									<strong>{question.prompt.trim() || 'Untitled question'}</strong>
+									<small>
+										{question.question_type === 'multiple_select'
+											? 'Multiple select'
+											: 'Single choice'}
+									</small>
+								</span>
+							</button>
+						{/each}
+						<button
+							class="add-question"
+							type="button"
+							disabled={questions.length >= maxQuestions}
+							onclick={addQuestion}
+						>
+							<span aria-hidden="true">+</span>
+							Add a question
+							<span class="question-count">{questions.length} / {maxQuestions}</span>
+						</button>
+					</nav>
+					{#if selectedQuestion}
+						<section class="question-detail-editor" aria-label="Question details">
+							<div class="question-detail-heading">
+								<p class="eyebrow">Question {selectedQuestionIndex + 1} of {questions.length}</p>
+								<p>Write the prompt, choose the answer type, and set the answer key.</p>
+							</div>
+							<QuestionEditor
+								question={selectedQuestion}
+								index={selectedQuestionIndex}
+								onUpdate={(updated) => updateQuestion(selectedQuestionIndex, updated)}
+								onRemove={() => removeQuestion(selectedQuestionIndex)}
+								onMoveUp={() => moveQuestion(selectedQuestionIndex, -1)}
+								onMoveDown={() => moveQuestion(selectedQuestionIndex, 1)}
+								canMoveUp={selectedQuestionIndex > 0}
+								canMoveDown={selectedQuestionIndex < questions.length - 1}
+								canRemove={questions.length > 1}
+							/>
+						</section>
+					{/if}
 				</div>
-
-				<button
-					class="add-question"
-					type="button"
-					disabled={questions.length >= maxQuestions}
-					onclick={() => (questions = [...questions, makeQuestion()])}
-				>
-					<span aria-hidden="true">+</span>
-					Add another question
-					<span class="question-count">{questions.length} / {maxQuestions}</span>
-				</button>
+				<p class="visually-hidden" role="status" aria-live="polite">{questionOrderNotice}</p>
 			</section>
 
 			<section class="play-settings" aria-labelledby="play-settings-heading">
@@ -635,7 +748,84 @@
 
 	.question-list {
 		display: grid;
+		align-content: start;
+		gap: 0.5rem;
+	}
+
+	.question-workspace {
+		display: grid;
+		grid-template-columns: minmax(13rem, 0.7fr) minmax(0, 1.8fr);
+		align-items: start;
 		gap: 1rem;
+	}
+
+	.question-nav-item {
+		display: flex;
+		min-width: 0;
+		align-items: flex-start;
+		gap: 0.7rem;
+		padding: 0.75rem;
+		border: 1px solid var(--line);
+		border-radius: 0.75rem;
+		background: white;
+		color: var(--ink);
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.question-nav-item:hover,
+	.question-nav-item.selected {
+		border-color: var(--gold-deep);
+		background: #fffaf0;
+	}
+
+	.question-nav-number {
+		display: grid;
+		width: 1.7rem;
+		height: 1.7rem;
+		flex: 0 0 auto;
+		place-items: center;
+		border-radius: 50%;
+		background: var(--navy-soft);
+		color: var(--navy);
+		font-size: 0.65rem;
+		font-weight: 800;
+	}
+
+	.question-nav-copy {
+		display: grid;
+		min-width: 0;
+		gap: 0.25rem;
+	}
+
+	.question-nav-copy strong {
+		overflow: hidden;
+		font-size: 0.76rem;
+		line-height: 1.4;
+		text-overflow: ellipsis;
+	}
+
+	.question-nav-copy small {
+		color: var(--ink-muted);
+		font-size: 0.66rem;
+	}
+
+	.question-detail-editor {
+		min-width: 0;
+	}
+
+	.question-detail-heading {
+		margin-bottom: 0.8rem;
+	}
+
+	.question-detail-heading .eyebrow {
+		margin-bottom: 0.2rem;
+	}
+
+	.question-detail-heading p:last-child {
+		margin: 0;
+		color: var(--ink-muted);
+		font-size: 0.78rem;
 	}
 
 	.add-question {
@@ -810,6 +1000,18 @@
 		}
 		.create-page {
 			padding-top: 1.4rem;
+		}
+
+		.question-workspace {
+			grid-template-columns: 1fr;
+		}
+
+		.question-list {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.question-list .add-question {
+			grid-column: 1 / -1;
 		}
 
 		.publish-row {

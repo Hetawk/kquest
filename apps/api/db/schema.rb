@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -26,7 +26,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000006) do
     t.boolean "speed_scoring", default: true, null: false
     t.index ["uploaded_asset_id"], name: "index_activities_on_uploaded_asset_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'published'::character varying::text])", name: "activities_status_valid"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'published'::character varying]::text[])", name: "activities_status_valid"
   end
 
   create_table "activity_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -95,7 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000006) do
     t.index ["host_user_id"], name: "index_game_rooms_on_host_user_id"
     t.index ["room_code"], name: "index_game_rooms_on_room_code", unique: true
     t.check_constraint "current_question_index >= 0", name: "game_rooms_question_index_nonnegative"
-    t.check_constraint "status::text = ANY (ARRAY['waiting'::character varying::text, 'active'::character varying::text, 'completed'::character varying::text])", name: "game_rooms_status_valid"
+    t.check_constraint "status::text = ANY (ARRAY['waiting'::character varying, 'active'::character varying, 'completed'::character varying]::text[])", name: "game_rooms_status_valid"
   end
 
   create_table "play_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -134,6 +134,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000006) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.integer "time_limit_seconds", default: 30, null: false
+    t.jsonb "correct_option_ids", default: [], null: false
     t.index ["activity_id", "position"], name: "index_questions_on_activity_id_and_position", unique: true
     t.index ["activity_id"], name: "index_questions_on_activity_id"
     t.check_constraint "\"position\" > 0", name: "questions_position_positive"

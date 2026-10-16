@@ -1,12 +1,50 @@
 <script lang="ts">
 	import type { ChoiceOption, QuestionDraft } from '../types';
 
-	let { question, index, onUpdate, onRemove } = $props<{
+	let {
+		question,
+		index,
+		onUpdate,
+		onRemove,
+		onMoveUp,
+		onMoveDown,
+		canMoveUp,
+		canMoveDown,
+		canRemove
+	} = $props<{
 		question: QuestionDraft;
 		index: number;
 		onUpdate: (question: QuestionDraft) => void;
 		onRemove: () => void;
+		onMoveUp: () => void;
+		onMoveDown: () => void;
+		canMoveUp: boolean;
+		canMoveDown: boolean;
+		canRemove: boolean;
 	}>();
+
+	function changeQuestionType(questionType: QuestionDraft['question_type']) {
+		const correctOptionIds = question.correct_option_ids.length
+			? question.correct_option_ids
+			: [question.correct_option_id];
+		onUpdate({
+			...question,
+			question_type: questionType,
+			correct_option_id: correctOptionIds[0] ?? question.options[0].id,
+			correct_option_ids: correctOptionIds
+		});
+	}
+
+	function toggleCorrectOption(optionId: string, checked: boolean) {
+		const correctOptionIds = checked
+			? [...question.correct_option_ids, optionId]
+			: question.correct_option_ids.filter((id: string) => id !== optionId);
+		onUpdate({
+			...question,
+			correct_option_id: correctOptionIds[0] ?? question.correct_option_id,
+			correct_option_ids: correctOptionIds
+		});
+	}
 
 	function updateOption(optionIndex: number, text: string) {
 		const options = question.options.map((option: ChoiceOption, currentIndex: number) =>
@@ -20,8 +58,42 @@
 	<legend class="question-legend">
 		<span class="question-number">{String(index + 1).padStart(2, '0')}</span>
 		<span>Question {index + 1}</span>
-		<button class="icon-button remove-button" type="button" onclick={onRemove}> Remove </button>
+		<button
+			class="icon-button order-button"
+			type="button"
+			aria-label="Move question {index + 1} up"
+			disabled={!canMoveUp}
+			onclick={onMoveUp}>↑</button
+		>
+		<button
+			class="icon-button order-button"
+			type="button"
+			aria-label="Move question {index + 1} down"
+			disabled={!canMoveDown}
+			onclick={onMoveDown}>↓</button
+		>
+		<button
+			class="icon-button remove-button"
+			type="button"
+			disabled={!canRemove}
+			onclick={onRemove}
+		>
+			Remove
+		</button>
 	</legend>
+
+	<label class="field-label question-type-label">
+		Question type
+		<select
+			class="text-input question-type-select"
+			value={question.question_type}
+			onchange={(event) =>
+				changeQuestionType(event.currentTarget.value as QuestionDraft['question_type'])}
+		>
+			<option value="single_choice">Single choice</option>
+			<option value="multiple_select">Multiple select</option>
+		</select>
+	</label>
 
 	<label class="field-label" for="prompt-{index}">Your question</label>
 	<textarea
@@ -36,20 +108,41 @@
 
 	<div class="option-heading">
 		<span class="field-label">Answer choices</span>
-		<span class="field-hint">Select the correct answer</span>
+		<span class="field-hint">
+			{question.question_type === 'multiple_select'
+				? 'Select all correct answers'
+				: 'Select the correct answer'}
+		</span>
 	</div>
 
 	<div class="option-list">
 		{#each question.options as option, optionIndex (option.id)}
 			<div class="option-row">
-				<label class="correct-choice" aria-label="Mark option {optionIndex + 1} as correct">
-					<input
-						type="radio"
-						name="correct-answer-{index}"
-						value={option.id}
-						checked={question.correct_option_id === option.id}
-						onchange={() => onUpdate({ ...question, correct_option_id: option.id })}
-					/>
+				<label
+					class="correct-choice"
+					class:multiple-select={question.question_type === 'multiple_select'}
+					aria-label="Mark option {optionIndex + 1} as correct"
+				>
+					{#if question.question_type === 'multiple_select'}
+						<input
+							type="checkbox"
+							checked={question.correct_option_ids.includes(option.id)}
+							onchange={(event) => toggleCorrectOption(option.id, event.currentTarget.checked)}
+						/>
+					{:else}
+						<input
+							type="radio"
+							name="correct-answer-{index}"
+							value={option.id}
+							checked={question.correct_option_id === option.id}
+							onchange={() =>
+								onUpdate({
+									...question,
+									correct_option_id: option.id,
+									correct_option_ids: [option.id]
+								})}
+						/>
+					{/if}
 					<span class="correct-indicator" aria-hidden="true"></span>
 				</label>
 				<input
@@ -69,7 +162,11 @@
 	</div>
 
 	<div class="question-footer">
-		<p class="field-hint">Tap the circle beside the right answer.</p>
+		<p class="field-hint">
+			{question.question_type === 'multiple_select'
+				? 'Scoring requires the exact set of correct answers.'
+				: 'Select the correct answer.'}
+		</p>
 		<label class="points-label" for="points-{index}">
 			<span>Points</span>
 			<input
@@ -162,12 +259,39 @@
 		color: var(--ink-soft);
 	}
 
+	.remove-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.4;
+	}
+
+	.order-button {
+		display: grid;
+		width: 2rem;
+		height: 2rem;
+		place-items: center;
+		padding: 0;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		color: var(--navy);
+	}
+
+	.order-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.35;
+	}
+
 	.field-label {
 		display: block;
 		margin-bottom: 0.55rem;
 		color: var(--ink);
 		font-size: 0.8rem;
 		font-weight: 700;
+	}
+
+	.question-type-select {
+		max-width: 17rem;
+		padding: 0.65rem 0.8rem;
+		font: inherit;
 	}
 
 	.text-input {
@@ -270,6 +394,10 @@
 		border-radius: 50%;
 		background: white;
 		box-shadow: inset 0 0 0 3px white;
+	}
+
+	.correct-choice.multiple-select .correct-indicator {
+		border-radius: 0.3rem;
 	}
 
 	.correct-choice input:checked + .correct-indicator {

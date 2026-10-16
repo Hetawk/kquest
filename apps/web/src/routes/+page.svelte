@@ -1,13 +1,22 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-
 	import { onMount } from 'svelte';
 	import QuestOrb from '#lib/components/QuestOrb.svelte';
+	import { getCurrentUser } from '#lib/features/activities/api.js';
 
 	let showOrb = $state(false);
+	let dashboardCheckError = $state('');
 
 	onMount(() => {
 		showOrb = true;
+		void getCurrentUser()
+			.then((user) => {
+				if (user) window.location.replace(resolve('/dashboard'));
+			})
+			.catch((cause: unknown) => {
+				dashboardCheckError =
+					cause instanceof Error ? cause.message : 'Your sign-in could not be checked.';
+			});
 	});
 </script>
 
@@ -16,6 +25,9 @@
 </svelte:head>
 
 <main>
+	{#if dashboardCheckError}
+		<p class="page-shell" role="status">{dashboardCheckError}</p>
+	{/if}
 	<section class="hero page-shell">
 		<div class="hero-copy">
 			<p class="eyebrow">A little wonder goes a long way</p>

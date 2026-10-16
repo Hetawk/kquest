@@ -217,6 +217,7 @@ module Api
             html: "<p>Hello #{escaped_name},</p><p>Use this code to #{purpose_text}:</p><p style=\"font-size:28px;font-weight:bold;letter-spacing:8px\">#{code}</p><p>This code expires in 10 minutes. If you did not request it, you can ignore this message.</p>",
             text: "Hello #{name},\n\nYour KINGDOM Quest code to #{purpose_text} is #{code}.\nIt expires in 10 minutes. If you did not request it, you can ignore this message."
           )
+          Rails.logger.info("auth_email_delivery_accepted purpose=#{reset ? 'password_reset' : 'email_verification'}")
         rescue Integrations::EkdSend::Client::DeliveryError
           challenge.destroy!
           raise

@@ -21,6 +21,7 @@ module Activities
               "prompt",
               "options",
               "correct_option_id",
+              "correct_option_ids",
               "points",
               "time_limit_seconds"
             )

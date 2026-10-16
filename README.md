@@ -70,11 +70,19 @@ The API exposes the Rails process health check at `/up` and a versioned API
 health response at `/api/v1/health`. Neither endpoint exposes database
 credentials or learner data.
 
-## Learning journey prototype
+## Learning journey
 
-The first end-to-end flow supports creating and publishing a single-choice
-quest, joining by share code, answering questions, and viewing a server-graded
-result. Sign-in supports Google OAuth and email/password accounts with
+The learning studio supports creating, ordering, publishing, and sharing
+single-choice and multiple-select quests; joining by share code; hosting live
+rooms; answering questions; and viewing server-graded results. Multiple-select
+answers are scored all-or-nothing when the selected set exactly matches the
+answer key. The authenticated dashboard is the default landing page after
+sign-in. Quest detail workspaces show the question library and answer key to
+the owner; published quests are immutable, so editing starts from a separate
+copy. Page and workspace loading states respect reduced-motion preferences.
+There is no subscription-plan cap on the number of quests or live-room
+participants. Sign-in supports Google OAuth and
+email/password accounts with
 opaque, database-backed sessions in encrypted, HTTP-only, same-site cookies.
 Email accounts must verify a one-time code before sign-in; password recovery
 uses a separate one-time code. Google email addresses must be verified;
@@ -118,13 +126,11 @@ quest ends. Howler.js is loaded only in the browser through Svelte's mount
 lifecycle. The generated assets can be recreated with
 `python3 apps/web/scripts/generate-audio-assets.py`.
 
-The authentication foundation supports Google OAuth, email registration and
-verification, password sign-in, and password recovery. Organization roles,
-educator authorization policies, and learner abuse protections are not
-complete. Activity authoring, asset upload, gameplay lookup, and play sessions
-therefore remain available only in Rails development and test; they return
-`404` in production. Do not expose the prototype content APIs as a production
-service yet.
+Creator APIs require a verified signed-in account and scope activity access to
+its owner. Published quests and game codes are public by design so learners
+can join without accounts. Organization roles, class-level administration,
+and additional anti-abuse controls are not implemented; do not treat a game
+code as private content.
 
 The decorative Three.js scene is not required for gameplay and respects reduced
 motion preferences. The API contract is in [`docs/api/openapi.yaml`](./docs/api/openapi.yaml).

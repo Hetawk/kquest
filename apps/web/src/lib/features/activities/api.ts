@@ -7,12 +7,41 @@ import type {
 	PlaySession,
 	PlaySessionProgress,
 	PublishedActivity,
-	QuestionDraft
+	QuestionDraft,
+	ChoiceOption
 } from './types';
 
 type ApiEnvelope<T> = { data: T };
-type ApiErrorEnvelope = { error?: { message?: string } };
+type ApiErrorEnvelope = { error?: { code?: string; message?: string } };
 type UserProfile = { id: string; email: string; name: string };
+export type CreatorActivity = {
+	id: string;
+	title: string;
+	description: string;
+	status: 'draft' | 'published';
+	question_count: number;
+	share_code: string | null;
+	version: number | null;
+	total_plays: number;
+	updated_at: string;
+	published_at: string | null;
+};
+export type CreatorQuestion = {
+	id: string;
+	position: number;
+	question_type: 'single_choice' | 'multiple_select';
+	prompt: string;
+	options: ChoiceOption[];
+	correct_option_id: string;
+	correct_option_ids: string[];
+	points: number;
+	time_limit_seconds: number;
+};
+export type CreatorActivityDetail = CreatorActivity & {
+	shuffle_questions: boolean;
+	speed_scoring: boolean;
+	questions: CreatorQuestion[];
+};
 type UploadedCover = {
 	id: string;
 	public_url: string;
@@ -23,7 +52,8 @@ type UploadedCover = {
 export class ApiRequestError extends Error {
 	constructor(
 		message: string,
-		readonly status: number
+		readonly status: number,
+		readonly code?: string
 	) {
 		super(message);
 		this.name = 'ApiRequestError';
@@ -93,7 +123,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 		const apiMessage = payload && 'error' in payload ? payload.error?.message : undefined;
 		throw new ApiRequestError(
 			apiMessage ?? `The request could not be completed (${response.status}).`,
-			response.status
+			response.status,
+			payload && 'error' in payload ? payload.error?.code : undefined
 		);
 	}
 
@@ -111,6 +142,17 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
 		if (error instanceof ApiRequestError && error.status === 401) return null;
 		throw error;
 	}
+}
+
+export function listCreatorActivities() {
+	return request<{
+		activities: CreatorActivity[];
+		summary: { total: number; published: number; plays: number };
+	}>('/api/v1/activities');
+}
+
+export function getCreatorActivity(activityId: string) {
+	return request<CreatorActivityDetail>(`/api/v1/activities/${encodeURIComponent(activityId)}`);
 }
 
 export function signOut() {
@@ -216,7 +258,8 @@ export function answerGameRoomQuestion(input: {
 	roomCode: string;
 	sessionId: string;
 	questionId: string;
-	optionId: string | null;
+	optionId?: string | null;
+	optionIds?: string[];
 	idempotencyKey: string;
 }) {
 	return request<{
@@ -231,7 +274,14 @@ export function answerGameRoomQuestion(input: {
 		{
 			method: 'POST',
 			headers: { 'Idempotency-Key': input.idempotencyKey },
-			body: JSON.stringify({ answer: { question_id: input.questionId, option_id: input.optionId } })
+			body: JSON.stringify({
+				answer: {
+					question_id: input.questionId,
+					...(input.optionIds !== undefined
+						? { option_ids: input.optionIds }
+						: { option_id: input.optionId ?? null })
+				}
+			})
 		}
 	);
 }
@@ -268,7 +318,8 @@ export function answerPlayQuestion(input: {
 	shareCode: string;
 	sessionId: string;
 	questionId: string;
-	optionId: string | null;
+	optionId?: string | null;
+	optionIds?: string[];
 	idempotencyKey: string;
 }) {
 	return request<PlaySessionProgress>(
@@ -277,7 +328,12 @@ export function answerPlayQuestion(input: {
 			method: 'POST',
 			headers: { 'Idempotency-Key': input.idempotencyKey },
 			body: JSON.stringify({
-				answer: { question_id: input.questionId, option_id: input.optionId }
+				answer: {
+					question_id: input.questionId,
+					...(input.optionIds !== undefined
+						? { option_ids: input.optionIds }
+						: { option_id: input.optionId ?? null })
+				}
 			})
 		}
 	);

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { navigating } from '$app/state';
 	import { onMount } from 'svelte';
 	import { getCurrentUser, signOut } from '#lib/features/activities/api.js';
 	import '../app.css';
@@ -12,6 +13,7 @@
 	let currentUser = $state<Awaited<ReturnType<typeof getCurrentUser>>>(null);
 	let authError = $state('');
 	let authNotice = $state('');
+	let isNavigating = $derived(navigating !== null);
 
 	onMount(() => {
 		const status = new URLSearchParams(window.location.search).get('auth');
@@ -66,6 +68,7 @@
 		</a>
 
 		<nav class="main-nav" aria-label="Main navigation">
+			{#if currentUser}<a href={resolve('/dashboard')}>Dashboard</a>{/if}
 			<a href={resolve('/create')}>Create</a>
 			<a href={resolve('/join')}>Join a game</a>
 		</nav>
@@ -80,6 +83,14 @@
 		{/if}
 	</div>
 </header>
+
+{#if isNavigating}
+	<div class="route-loading" role="status" aria-live="polite" aria-label="Loading page">
+		<span class="route-loading-bar"></span>
+		<span class="route-loading-mark" aria-hidden="true">K</span>
+		<span class="visually-hidden">Opening the next page…</span>
+	</div>
+{/if}
 
 {#if authNotice || authError}
 	<div
@@ -202,6 +213,64 @@
 		padding-top: 0.7rem;
 		color: var(--navy);
 		font-size: 0.85rem;
+	}
+
+	.route-loading {
+		position: fixed;
+		z-index: 20;
+		inset: 0 0 auto;
+		height: 3px;
+		pointer-events: none;
+	}
+
+	.route-loading-bar {
+		display: block;
+		width: 35%;
+		height: 100%;
+		border-radius: 999px;
+		background: linear-gradient(90deg, var(--gold-deep), var(--navy), var(--gold));
+		box-shadow: 0 0 12px rgb(200 160 97 / 40%);
+		animation: route-progress 1.05s ease-in-out infinite;
+	}
+
+	.route-loading-mark {
+		position: fixed;
+		top: 1.15rem;
+		right: 1.2rem;
+		display: grid;
+		width: 2.2rem;
+		height: 2.2rem;
+		place-items: center;
+		border: 1px solid var(--line);
+		border-radius: 0.7rem;
+		background: var(--paper);
+		color: var(--navy);
+		font-family: Manrope, sans-serif;
+		font-size: 0.82rem;
+		font-weight: 850;
+		animation: route-pulse 950ms ease-in-out infinite alternate;
+	}
+
+	@keyframes route-progress {
+		0% {
+			transform: translateX(-100%);
+		}
+		100% {
+			transform: translateX(310%);
+		}
+	}
+
+	@keyframes route-pulse {
+		to {
+			transform: rotate(12deg) scale(1.06);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.route-loading-bar,
+		.route-loading-mark {
+			animation: none;
+		}
 	}
 
 	.auth-error {

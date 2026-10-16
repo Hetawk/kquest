@@ -27,19 +27,19 @@ module Assessments
           room.play_sessions.where(completed_at: nil).order(:id).lock.each do |session|
             next if session.responses.any? { |response| response["question_id"] == question.fetch("id") }
 
-            session.update!(
-              responses: session.responses + [
-                {
-                  "question_id" => question.fetch("id"),
-                  "option_id" => nil,
-                  "points_awarded" => 0,
-                  "speed_bonus" => 0,
-                  "response_time_ms" => nil,
-                  "answered_at" => nil
-                }
-              ],
-              updated_at: now
-            )
+            response = {
+              "question_id" => question.fetch("id"),
+              "points_awarded" => 0,
+              "speed_bonus" => 0,
+              "response_time_ms" => nil,
+              "answered_at" => nil
+            }
+            if question.fetch("question_type", "single_choice") == "multiple_select"
+              response["option_ids"] = []
+            else
+              response["option_id"] = nil
+            end
+            session.update!(responses: session.responses + [ response ], updated_at: now)
           end
 
           if room.current_question_index + 1 == snapshot.length

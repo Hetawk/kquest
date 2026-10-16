@@ -1,7 +1,6 @@
 module Api
   module V1
     class GameRoomsController < ApplicationController
-      before_action :prototype_api_only?
       before_action :require_current_user, only: %i[create start advance]
 
       def create
@@ -107,11 +106,12 @@ module Api
         session = room.play_sessions.find_by(id: params[:session_id])
         return render_not_found unless session
 
-        attributes = params.require(:answer).permit(:question_id, :option_id)
+        attributes = params.require(:answer).permit(:question_id, :option_id, option_ids: [])
         result = Assessments::Services::AdvanceGameRoomAnswer.call(
           session: session,
           question_id: attributes[:question_id],
           option_id: attributes[:option_id],
+          option_ids: attributes[:option_ids],
           request_key: request.headers["Idempotency-Key"]
         )
         render json: { data: result }

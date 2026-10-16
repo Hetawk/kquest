@@ -102,11 +102,4 @@ class ApplicationController < ActionController::API
       status: :not_found
     )
   end
-
-  def prototype_api_only?
-    return true if Rails.env.development? || Rails.env.test?
-
-    render_not_found
-    false
-  end
 end

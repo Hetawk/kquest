@@ -1,7 +1,7 @@
 class Question < ApplicationRecord
   belongs_to :activity
 
-  validates :question_type, inclusion: { in: %w[single_choice] }
+  validates :question_type, inclusion: { in: %w[single_choice multiple_select] }
   validates :position, numericality: { only_integer: true, greater_than: 0 }
   validates :points, numericality: { only_integer: true, in: 1..1000 }
   validates :time_limit_seconds, numericality: {
@@ -15,13 +15,26 @@ class Question < ApplicationRecord
   private
 
   def definition_is_valid
-    definition_errors = Questions::Types::SingleChoice.definition_errors(
-      prompt: prompt,
-      options: options,
-      correct_option_id: correct_option_id,
-      points: points,
-      time_limit_seconds: time_limit_seconds
-    )
+    definition_errors = case question_type
+    when "single_choice"
+      Questions::Types::SingleChoice.definition_errors(
+        prompt: prompt,
+        options: options,
+        correct_option_id: correct_option_id,
+        points: points,
+        time_limit_seconds: time_limit_seconds
+      )
+    when "multiple_select"
+      Questions::Types::MultipleSelect.definition_errors(
+        prompt: prompt,
+        options: options,
+        correct_option_ids: correct_option_ids || [],
+        points: points,
+        time_limit_seconds: time_limit_seconds
+      )
+    else
+      {}
+    end
 
     definition_errors.each do |attribute, message|
       errors.add(attribute, message)

@@ -72,6 +72,13 @@ class AuthenticationTest < ActionDispatch::IntegrationTest
     assert_equal "authentication_required", response.parsed_body.dig("error", "code")
   end
 
+  test "the creator quest dashboard requires a signed-in user" do
+    get "/api/v1/activities", as: :json
+
+    assert_response :unauthorized
+    assert_equal "authentication_required", response.parsed_body.dig("error", "code")
+  end
+
   private
 
   def sign_in_with_google

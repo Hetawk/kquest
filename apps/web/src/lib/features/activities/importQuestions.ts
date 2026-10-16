@@ -109,9 +109,11 @@ function questionFromRow(row: ImportRow, rowNumber: number): QuestionDraft {
 
 	const choices = options.map((text) => ({ id: crypto.randomUUID(), text }));
 	return {
+		question_type: 'single_choice',
 		prompt,
 		options: choices,
 		correct_option_id: choices[correctIndex].id,
+		correct_option_ids: [choices[correctIndex].id],
 		points,
 		time_limit_seconds: timeLimit
 	};

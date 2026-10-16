@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getCsrfToken, getCurrentUser } from '#lib/features/activities/api.js';
+	import { ApiRequestError, getCsrfToken, getCurrentUser } from '#lib/features/activities/api.js';
 	import {
 		registerWithEmail,
 		signInWithEmail,
@@ -23,7 +23,8 @@
 	let csrfToken = $state('');
 	let error = $state('');
 	let notice = $state('');
-	let nextPath = $state('/');
+	let nextPath = $state('/dashboard');
+	let verificationSent = $state(false);
 
 	const isEmailMode = $derived(mode === 'sign_in' || mode === 'sign_up');
 
@@ -55,8 +56,20 @@
 		error = '';
 		notice = '';
 		code = '';
+		verificationSent = false;
 		password = '';
 		passwordConfirmation = '';
+	}
+
+	async function sendVerificationCode() {
+		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+			error = 'Enter the email address for your account first.';
+			return;
+		}
+
+		verificationSent = true;
+		const result = await resendEmailVerification({ email });
+		notice = result.message;
 	}
 
 	function handleCodeInput(event: Event) {
@@ -87,10 +100,15 @@
 				});
 				email = result.email;
 				setMode('verify_email');
+				verificationSent = true;
 				notice = 'We sent a six-digit verification code to your email.';
 			} else if (mode === 'verify_email') {
-				await verifyEmailAddress({ email, code });
-				window.location.assign(nextPath);
+				if (!verificationSent) {
+					await sendVerificationCode();
+				} else {
+					await verifyEmailAddress({ email, code });
+					window.location.assign(nextPath);
+				}
 			} else if (mode === 'forgot_password') {
 				const result = await requestPasswordReset({ email });
 				setMode('reset_password');
@@ -105,7 +123,24 @@
 				window.location.assign(nextPath);
 			}
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'We could not complete that request.';
+			if (
+				mode === 'sign_in' &&
+				cause instanceof ApiRequestError &&
+				cause.code === 'email_unverified'
+			) {
+				setMode('verify_email');
+				busy = true;
+				try {
+					await sendVerificationCode();
+				} catch (sendCause) {
+					error =
+						sendCause instanceof Error
+							? sendCause.message
+							: 'We could not send your verification code. Try again shortly.';
+				}
+			} else {
+				error = cause instanceof Error ? cause.message : 'We could not complete that request.';
+			}
 		} finally {
 			busy = false;
 		}
@@ -117,8 +152,11 @@
 		error = '';
 		notice = '';
 		try {
-			const result = await resendEmailVerification({ email });
-			notice = result.message;
+			if (mode === 'sign_in') {
+				mode = 'verify_email';
+				verificationSent = false;
+			}
+			await sendVerificationCode();
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'We could not send another code.';
 		} finally {
@@ -153,7 +191,12 @@
 				{#if mode === 'sign_up'}
 					Join KINGDOM Quest and save the learning activities you create.
 				{:else if mode === 'verify_email'}
-					Enter the six-digit code we sent to <strong>{email}</strong>. It expires in 10 minutes.
+					{#if verificationSent}
+						Enter the six-digit code we sent to <strong>{email}</strong>. Check your spam folder if
+						it is not in your inbox. The code expires in 10 minutes.
+					{:else}
+						Enter the email address for your account to request a six-digit verification code.
+					{/if}
 				{:else if mode === 'forgot_password'}
 					Enter your email and we’ll send a reset code if an email/password account exists.
 				{:else if mode === 'reset_password'}
@@ -201,7 +244,7 @@
 					</label>
 				{/if}
 
-				{#if mode !== 'verify_email'}
+				{#if mode !== 'reset_password'}
 					<label>
 						<span>Email address</span>
 						<input
@@ -212,12 +255,11 @@
 							autocomplete="email"
 							maxlength="320"
 							required
-							disabled={mode === 'reset_password'}
 						/>
 					</label>
 				{/if}
 
-				{#if mode === 'verify_email' || mode === 'reset_password'}
+				{#if (mode === 'verify_email' && verificationSent) || mode === 'reset_password'}
 					<label>
 						<span>Email code</span>
 						<input
@@ -279,7 +321,7 @@
 					{:else if mode === 'sign_up'}
 						Create account
 					{:else if mode === 'verify_email'}
-						Verify email
+						{verificationSent ? 'Verify email' : 'Send verification code'}
 					{:else if mode === 'forgot_password'}
 						Send reset code
 					{:else}
@@ -295,9 +337,13 @@
 				<button class="text-action" type="button" onclick={handleResendCode} disabled={busy}>
 					Need to verify your email?
 				</button>
-			{:else if mode === 'verify_email'}
+			{:else if mode === 'verify_email' && verificationSent}
 				<button class="text-action" type="button" onclick={handleResendCode} disabled={busy}>
 					Send another code
+				</button>
+			{:else if mode === 'verify_email'}
+				<button class="text-action" type="button" onclick={() => setMode('sign_in')}>
+					Return to sign in
 				</button>
 			{:else if mode === 'reset_password'}
 				<button class="text-action" type="button" onclick={() => setMode('forgot_password')}>
@@ -311,16 +357,18 @@
 
 			<div class="divider"><span>or</span></div>
 
-			<form class="google-form" action="/api/v1/auth/google_oauth2" method="post">
-				<input type="hidden" name="authenticity_token" value={csrfToken} />
-				<button
-					class="button button-outline google-button"
-					type="submit"
-					disabled={!csrfToken || busy}
-				>
-					Continue with Google <span aria-hidden="true">↗</span>
-				</button>
-			</form>
+			{#if isEmailMode}
+				<form class="google-form" action="/api/v1/auth/google_oauth2" method="post">
+					<input type="hidden" name="authenticity_token" value={csrfToken} />
+					<button
+						class="button button-outline google-button"
+						type="submit"
+						disabled={!csrfToken || busy}
+					>
+						Continue with Google <span aria-hidden="true">↗</span>
+					</button>
+				</form>
+			{/if}
 		{/if}
 
 		<p class="auth-footnote">

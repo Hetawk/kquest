@@ -16,7 +16,7 @@
 	let room = $state<GameRoom | null>(null);
 	let name = $state('');
 	let sessionId = $state('');
-	let selectedOption = $state('');
+	let selectedOptionIds = $state<string[]>([]);
 	let error = $state('');
 	let feedback = $state('');
 	let loading = $state(true);
@@ -54,7 +54,7 @@
 				if (updated.participant) {
 					name = updated.participant.learner_name;
 					if (previousIndex !== updated.question_index) {
-						selectedOption = '';
+						selectedOptionIds = [];
 						feedback = '';
 						answeredLocally = false;
 						answerKey = '';
@@ -90,7 +90,7 @@
 			remaining = Math.max(0, (deadlineAt - performance.now()) / 1000);
 			if (remaining <= 0 && !timeoutSent && !submitting) {
 				timeoutSent = true;
-				void submitAnswer(null);
+				void submitAnswer([]);
 			}
 		}, 150);
 		return () => {
@@ -143,7 +143,7 @@
 		}
 	}
 
-	async function submitAnswer(optionId: string | null) {
+	async function submitAnswer(optionIds: string[]) {
 		const question = room?.current_question;
 		if (!question || !sessionId || submitting || answeredLocally || !room) return;
 		submitting = true;
@@ -154,7 +154,9 @@
 				roomCode,
 				sessionId,
 				questionId: question.id,
-				optionId,
+				...(question.question_type === 'multiple_select'
+					? { optionIds }
+					: { optionId: optionIds[0] ?? null }),
 				idempotencyKey: answerKey
 			});
 			answeredLocally = true;
@@ -167,7 +169,7 @@
 			answerKey = '';
 			void fetchGameRoom(roomCode, sessionId).then((updated) => (room = updated));
 		} catch (cause) {
-			if (optionId === null) timeoutSent = false;
+			if (optionIds.length === 0) timeoutSent = false;
 			error = cause instanceof Error ? cause.message : 'Your answer could not be saved.';
 		} finally {
 			submitting = false;
@@ -302,14 +304,28 @@
 				{:else}<p class="untimed">Your host will move the group on when ready.</p>{/if}
 				<h2 class="question-prompt">{room.current_question.prompt}</h2>
 				<fieldset class="answer-list" disabled={submitting || answeredLocally || questionExpired}>
-					<legend>Choose your answer</legend>
+					<legend>
+						{room.current_question.question_type === 'multiple_select'
+							? 'Choose every answer that is correct.'
+							: 'Choose your answer.'}
+					</legend>
 					{#each room.current_question.options as option, index (option.id)}
-						<label class="answer-option" class:selected={selectedOption === option.id}>
+						<label class="answer-option" class:selected={selectedOptionIds.includes(option.id)}>
 							<input
-								type="radio"
+								type={room.current_question.question_type === 'multiple_select'
+									? 'checkbox'
+									: 'radio'}
 								name="live-answer"
 								value={option.id}
-								bind:group={selectedOption}
+								checked={selectedOptionIds.includes(option.id)}
+								onchange={() => {
+									selectedOptionIds =
+										room?.current_question?.question_type === 'multiple_select'
+											? selectedOptionIds.includes(option.id)
+												? selectedOptionIds.filter((id) => id !== option.id)
+												: [...selectedOptionIds, option.id]
+											: [option.id];
+								}}
 							/>
 							<span>{String.fromCharCode(65 + index)}</span><strong>{option.text}</strong>
 						</label>
@@ -320,8 +336,8 @@
 					<button
 						class="button button-primary submit-button"
 						type="button"
-						disabled={submitting || (!selectedOption && !questionExpired)}
-						onclick={() => submitAnswer(selectedOption || null)}
+						disabled={submitting || (!selectedOptionIds.length && !questionExpired)}
+						onclick={() => submitAnswer(selectedOptionIds)}
 					>
 						{submitting ? 'Saving answer…' : questionExpired ? 'Submit timeout' : 'Lock in answer'}
 						<span aria-hidden="true">↗</span>

@@ -1,5 +1,4 @@
 class Activity < ApplicationRecord
-  MAX_QUESTIONS = 100
   STATUSES = %w[draft published].freeze
 
   belongs_to :user, optional: true
@@ -12,7 +11,6 @@ class Activity < ApplicationRecord
   validates :description, length: { maximum: 500 }
   validates :status, inclusion: { in: STATUSES }
   validate :published_content_is_immutable, if: :persisted?
-  validate :question_count_within_limit
 
   private
 
@@ -20,11 +18,5 @@ class Activity < ApplicationRecord
     return unless status_in_database == "published"
 
     errors.add(:base, "Published activities cannot be edited.")
-  end
-
-  def question_count_within_limit
-    return if questions.size <= MAX_QUESTIONS
-
-    errors.add(:questions, "cannot exceed #{MAX_QUESTIONS} questions.")
   end
 end

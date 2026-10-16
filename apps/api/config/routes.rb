@@ -20,7 +20,7 @@ Rails.application.routes.draw do
       match "auth/google_oauth2/callback", to: "auth/google_callbacks#create", via: %i[get post]
       get "auth/failure", to: "auth/google_callbacks#failure"
       post "assets/upload", to: "assets#create"
-      resources :activities, only: :create do
+      resources :activities, only: %i[index show create] do
         resources :publications, only: :create, controller: "publications"
       end
       post "activities/:activity_id/game_rooms", to: "game_rooms#create"

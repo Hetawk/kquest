@@ -2,19 +2,18 @@ module Api
   module V1
     class PlayAnswersController < ApplicationController
       def create
-        return unless prototype_api_only?
-
         activity_version = ActivityVersion.includes(:activity).find_by(share_code: normalized_share_code)
         return render_not_found unless activity_version
 
         session = activity_version.play_sessions.find_by(id: params[:session_id])
         return render_not_found unless session
 
-        attributes = params.require(:answer).permit(:question_id, :option_id)
+        attributes = params.require(:answer).permit(:question_id, :option_id, option_ids: [])
         result = Assessments::Services::AdvancePlaySession.call(
           session: session,
           question_id: attributes[:question_id],
           option_id: attributes[:option_id],
+          option_ids: attributes[:option_ids],
           request_key: request.headers["Idempotency-Key"]
         )
         render(json: { data: result })
