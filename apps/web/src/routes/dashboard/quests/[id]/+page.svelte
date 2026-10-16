@@ -143,6 +143,12 @@
 					>
 						Preview
 					</a>
+					<a
+						class="button button-outline"
+						href={resolve('/host/activities/[id]', { id: activity.id })}
+					>
+						Edit quest
+					</a>
 					<button
 						class="button button-outline"
 						type="button"
@@ -213,9 +219,9 @@
 						<p class="eyebrow">Question library</p>
 						<h2>Inside this quest</h2>
 					</div>
-					<button class="text-link" type="button" onclick={copyAndEdit}>
-						Edit questions in a copy <span aria-hidden="true">↗</span>
-					</button>
+					<a class="text-link" href={resolve('/host/activities/[id]', { id: activity.id })}>
+						Review and edit questions before starting <span aria-hidden="true">↗</span>
+					</a>
 				</div>
 				{#if activity.questions.length}
 					<div class="question-library">

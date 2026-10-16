@@ -27,11 +27,16 @@ module Activities
             )
           end
           questions.each { |question| question["speed_scoring"] = activity.speed_scoring? }
-          questions.shuffle! if activity.shuffle_questions?
+          if activity.shuffle_questions?
+            questions.shuffle!
+            questions.each_with_index { |question, index| question["position"] = index + 1 }
+          end
 
           version = activity.activity_versions.create!(
             version_number: activity.activity_versions.maximum(:version_number).to_i + 1,
             question_snapshot: questions,
+            shuffle_questions: activity.shuffle_questions?,
+            speed_scoring: activity.speed_scoring?,
             cover_image_url: activity.uploaded_asset&.public_url,
             published_at: Time.current
           )

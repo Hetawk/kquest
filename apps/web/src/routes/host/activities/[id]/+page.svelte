@@ -2,21 +2,32 @@
 	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import QuestionEditor from '#lib/features/activities/components/QuestionEditor.svelte';
 	import {
 		createGameRoom,
 		getCreatorActivity,
-		getCurrentUser
+		getCurrentUser,
+		reviseActivity
 	} from '#lib/features/activities/api.js';
 	import type { CreatorActivityDetail } from '#lib/features/activities/api.js';
+	import type { QuestionDraft } from '#lib/features/activities/types.js';
 	import type { PageProps } from './$types';
+
+	type EditableQuestion = QuestionDraft & { id: string };
 
 	let { data }: PageProps = $props();
 	let activity = $state<CreatorActivityDetail | null>(null);
+	let questions = $state<EditableQuestion[]>([]);
+	let originalQuestions = $state('');
 	let mode = $state<'host_paced' | 'self_paced'>('host_paced');
-	let step = $state<'mode' | 'settings'>('mode');
+	let step = $state<'mode' | 'questions' | 'settings'>('mode');
 	let loading = $state(true);
 	let starting = $state(false);
+	let saving = $state(false);
+	let bulkTimeLimit = $state('30');
 	let error = $state('');
+	let notice = $state('');
+	let hasChanges = $derived(originalQuestions !== JSON.stringify(questions));
 
 	onMount(() => {
 		void (async () => {
@@ -29,6 +40,16 @@
 					return;
 				}
 				activity = await getCreatorActivity(data.activityId);
+				questions = activity.questions.map((question) => ({
+					...question,
+					options: question.options.map((option) => ({ ...option })),
+					correct_option_ids:
+						question.correct_option_ids.length > 0
+							? [...question.correct_option_ids]
+							: [question.correct_option_id]
+				}));
+				originalQuestions = JSON.stringify(questions);
+				bulkTimeLimit = String(questions[0]?.time_limit_seconds ?? 30);
 				if (!activity.share_code) {
 					error = 'Publish this quest before starting a session.';
 				}
@@ -40,11 +61,110 @@
 		})();
 	});
 
+	function moveQuestion(index: number, direction: -1 | 1) {
+		const target = index + direction;
+		if (target < 0 || target >= questions.length) return;
+		const reordered = [...questions];
+		[reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+		questions = reordered;
+	}
+
+	function updateQuestion(index: number, updated: QuestionDraft) {
+		questions = questions.map((question, currentIndex) =>
+			currentIndex === index ? { ...updated, id: question.id } : question
+		);
+	}
+
+	function removeQuestion(index: number) {
+		if (questions.length <= 1) return;
+		questions = questions.filter((_, currentIndex) => currentIndex !== index);
+	}
+
+	function addQuestion() {
+		questions = [
+			...questions,
+			{
+				id: crypto.randomUUID(),
+				question_type: 'single_choice',
+				prompt: '',
+				options: [
+					{ id: crypto.randomUUID(), text: '' },
+					{ id: crypto.randomUUID(), text: '' }
+				],
+				correct_option_id: '',
+				correct_option_ids: [],
+				points: 100,
+				time_limit_seconds: 30
+			}
+		];
+	}
+
+	function applyBulkTimeLimit() {
+		const rawTimeLimit = String(bulkTimeLimit).trim();
+		const timeLimit = Number(rawTimeLimit);
+		if (
+			rawTimeLimit === '' ||
+			!Number.isInteger(timeLimit) ||
+			(timeLimit !== 0 && (timeLimit < 5 || timeLimit > 300))
+		) {
+			error = 'Use 0 for untimed questions, or enter a time from 5 to 300 seconds.';
+			return;
+		}
+		error = '';
+		questions = questions.map((question) => ({
+			...question,
+			time_limit_seconds: timeLimit
+		}));
+	}
+
+	async function persistRevision() {
+		if (!activity || !hasChanges) return;
+		const savedAt = new Date().toISOString();
+		const updatedQuestions = questions.map((question, index) => ({
+			...question,
+			position: index + 1
+		}));
+		const publication = await reviseActivity(activity.id, {
+			expected_version: activity.version ?? 1,
+			shuffle_questions: activity.shuffle_questions,
+			speed_scoring: activity.speed_scoring,
+			questions: updatedQuestions
+		});
+		activity = {
+			...activity,
+			share_code: publication.share_code,
+			version: publication.version,
+			question_count: updatedQuestions.length,
+			published_at: savedAt,
+			updated_at: savedAt,
+			questions: updatedQuestions
+		};
+		questions = updatedQuestions;
+		originalQuestions = JSON.stringify(questions);
+		notice = `Version ${publication.version} saved. Your new join code is ${publication.share_code}; previous versions remain available on their original links.`;
+	}
+
+	async function saveRevision() {
+		if (!hasChanges || saving || starting) return;
+		saving = true;
+		error = '';
+		notice = '';
+		try {
+			await persistRevision();
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Your quest revision could not be saved.';
+		} finally {
+			saving = false;
+		}
+	}
+
 	async function startSession() {
 		if (!activity?.share_code || starting) return;
 		starting = true;
 		error = '';
+		notice = '';
 		try {
+			if (hasChanges) await persistRevision();
 			if (mode === 'host_paced') {
 				const room = await createGameRoom(activity.id);
 				await goto(resolve('/host/room/[code]', { code: room.room_code }));
@@ -98,10 +218,12 @@
 				<h1>{activity.title}</h1>
 				<p>Choose how your learners will experience this quest.</p>
 			</div>
-			<div class="step-count"><span>{step === 'mode' ? '01' : '02'}</span> / 02</div>
+			<div class="step-count">
+				<span>{step === 'mode' ? '01' : step === 'questions' ? '02' : '03'}</span> / 03
+			</div>
 		</div>
 		<div class="step-track" aria-hidden="true">
-			<span class:complete={step === 'settings'}></span>
+			<span class:half={step === 'questions'} class:complete={step === 'settings'}></span>
 		</div>
 		{#if step === 'mode'}
 			<section class="setup-card" aria-labelledby="mode-heading">
@@ -129,6 +251,77 @@
 				</div>
 				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
 				<div class="step-actions">
+					<button class="button button-primary" type="button" onclick={() => (step = 'questions')}>
+						Continue <span aria-hidden="true">→</span>
+					</button>
+				</div>
+			</section>
+		{:else if step === 'questions'}
+			<section class="setup-card question-review" aria-labelledby="questions-heading">
+				<p class="eyebrow">QUEST CONTENT · {questions.length} QUESTIONS</p>
+				<h2 id="questions-heading">Review and refine your questions</h2>
+				<p class="section-copy">
+					Reorder questions, adjust answer choices and correct answers, or set timing for the whole
+					quest or individual questions.
+				</p>
+				<div class="bulk-timing">
+					<div>
+						<strong>Set time for every question</strong>
+						<p>Apply one time limit to the whole quest. Enter 0 for no time limit.</p>
+					</div>
+					<label>
+						<span class="visually-hidden">Time limit for every question in seconds</span>
+						<input
+							class="bulk-time-input"
+							type="number"
+							min="0"
+							max="300"
+							step="1"
+							bind:value={bulkTimeLimit}
+							aria-label="Time limit for every question in seconds"
+						/>
+						<span>seconds</span>
+					</label>
+					<button class="button button-outline" type="button" onclick={applyBulkTimeLimit}>
+						Update all
+					</button>
+				</div>
+				<div class="question-list">
+					{#each questions as question, index (question.id)}
+						<QuestionEditor
+							{question}
+							{index}
+							onUpdate={(updated) => updateQuestion(index, updated)}
+							onRemove={() => removeQuestion(index)}
+							onMoveUp={() => moveQuestion(index, -1)}
+							onMoveDown={() => moveQuestion(index, 1)}
+							canMoveUp={index > 0}
+							canMoveDown={index < questions.length - 1}
+							canRemove={questions.length > 1}
+						/>
+					{/each}
+				</div>
+				<button class="button button-outline add-question" type="button" onclick={addQuestion}>
+					+ Add a question
+				</button>
+				<p class="revision-note">
+					Saving creates a new quest version. Existing learners and previously shared links keep the
+					version they already use.
+				</p>
+				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
+				{#if notice}<p class="success-message" role="status">{notice}</p>{/if}
+				<div class="step-actions">
+					<button class="button button-outline" type="button" onclick={() => (step = 'mode')}
+						>← Back</button
+					>
+					<button
+						class="button button-outline"
+						type="button"
+						onclick={saveRevision}
+						disabled={!hasChanges || saving || starting}
+					>
+						{saving ? 'Saving…' : 'Update quest'}
+					</button>
 					<button class="button button-primary" type="button" onclick={() => (step = 'settings')}>
 						Continue <span aria-hidden="true">→</span>
 					</button>
@@ -162,7 +355,7 @@
 								></span
 							>
 							<b
-								>{activity.questions.some((question) => question.time_limit_seconds > 0)
+								>{questions.some((question) => question.time_limit_seconds > 0)
 									? 'As set'
 									: 'Untimed'}</b
 							>
@@ -194,7 +387,7 @@
 								></span
 							>
 							<b
-								>{activity.questions.some((question) => question.time_limit_seconds > 0)
+								>{questions.some((question) => question.time_limit_seconds > 0)
 									? 'As set'
 									: 'Untimed'}</b
 							>
@@ -214,9 +407,10 @@
 					No plan-based participant limit. Technical safeguards keep sessions reliable.
 				</p>
 				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
+				{#if notice}<p class="success-message" role="status">{notice}</p>{/if}
 				<div class="step-actions">
-					<button class="button button-outline" type="button" onclick={() => (step = 'mode')}
-						>← Back</button
+					<button class="button button-outline" type="button" onclick={() => (step = 'questions')}
+						>← Review questions</button
 					>
 					<button
 						class="button button-primary"
@@ -298,10 +492,13 @@
 	}
 	.step-track span {
 		display: block;
-		width: 50%;
+		width: 33.333%;
 		height: 100%;
 		background: var(--gold-deep);
 		transition: width 180ms ease;
+	}
+	.step-track span.half {
+		width: 66.666%;
 	}
 	.step-track span.complete {
 		width: 100%;
@@ -388,6 +585,78 @@
 		margin-top: 1.2rem;
 		border-top: 1px solid var(--line);
 	}
+	.bulk-timing {
+		display: flex;
+		align-items: center;
+		gap: 0.8rem;
+		margin: 1.4rem 0;
+		padding: 1rem;
+		border: 1px solid var(--line);
+		border-radius: 0.9rem;
+		background: #fbfaf8;
+	}
+	.bulk-timing > div {
+		flex: 1;
+	}
+	.bulk-timing strong {
+		color: var(--navy);
+		font-size: 0.85rem;
+	}
+	.bulk-timing p {
+		margin: 0.25rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.75rem;
+		line-height: 1.5;
+	}
+	.bulk-timing label {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: var(--ink-muted);
+		font-size: 0.75rem;
+	}
+	.bulk-time-input {
+		width: 5rem;
+		min-height: 2.6rem;
+		padding: 0.4rem;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		color: var(--ink);
+		font: inherit;
+	}
+	.question-list {
+		display: grid;
+		gap: 1rem;
+	}
+	.add-question {
+		width: 100%;
+		margin-top: 1rem;
+	}
+	.revision-note {
+		margin: 1rem 0 0;
+		padding: 0.8rem 1rem;
+		border-radius: 0.65rem;
+		background: #f5f0e5;
+		color: var(--ink-muted);
+		font-size: 0.76rem;
+		line-height: 1.55;
+	}
+	.success-message {
+		margin: 1rem 0 0;
+		color: #226644;
+		font-size: 0.8rem;
+		line-height: 1.5;
+	}
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
 	.setting-row {
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr) auto;
@@ -457,6 +726,10 @@
 		}
 		.mode-grid {
 			grid-template-columns: 1fr;
+		}
+		.bulk-timing {
+			align-items: stretch;
+			flex-direction: column;
 		}
 		.mode-card {
 			min-height: auto;

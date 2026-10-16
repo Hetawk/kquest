@@ -174,6 +174,10 @@ test('opens an owner quest workspace with question answers and overview tabs', a
 
 	await page.goto('/dashboard/quests/quest-id');
 	await expect(page.getByRole('heading', { name: 'A published quest' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Edit quest', exact: true })).toHaveAttribute(
+		'href',
+		'/host/activities/quest-id'
+	);
 	await expect(page.getByText('First correct answer')).toBeVisible();
 	await expect(page.getByText('Multiple select')).toBeVisible();
 	await expect(page.getByText('Correct answer').first()).toBeVisible();
@@ -281,6 +285,7 @@ test('shows the created quest ID separately from its learner game code', async (
 test('opens session setup and creates a live lobby with a join QR code and participant roster', async ({
 	page
 }) => {
+	let revisionCount = 0;
 	await page.route('**/api/v1/me', (route) =>
 		route.fulfill({
 			json: {
@@ -304,7 +309,38 @@ test('opens session setup and creates a live lobby with a join QR code and parti
 					published_at: '2026-10-16T12:00:00Z',
 					shuffle_questions: false,
 					speed_scoring: true,
-					questions: [{ time_limit_seconds: 30 }]
+					questions: [
+						{
+							id: '10101010-1010-4101-8101-101010101001',
+							position: 1,
+							question_type: 'single_choice',
+							prompt: 'Alpha question',
+							options: [
+								{ id: '10101010-1010-4101-8101-101010101101', text: 'Alpha answer' },
+								{ id: '10101010-1010-4101-8101-101010101102', text: 'Beta answer' },
+								{ id: '10101010-1010-4101-8101-101010101103', text: 'Gamma answer' }
+							],
+							correct_option_id: '10101010-1010-4101-8101-101010101101',
+							correct_option_ids: ['10101010-1010-4101-8101-101010101101'],
+							points: 100,
+							time_limit_seconds: 30
+						},
+						{
+							id: '10101010-1010-4101-8101-101010101002',
+							position: 2,
+							question_type: 'single_choice',
+							prompt: 'Bravo question',
+							options: [
+								{ id: '10101010-1010-4101-8101-101010101201', text: 'First choice' },
+								{ id: '10101010-1010-4101-8101-101010101202', text: 'Second choice' },
+								{ id: '10101010-1010-4101-8101-101010101203', text: 'Third choice' }
+							],
+							correct_option_id: '10101010-1010-4101-8101-101010101201',
+							correct_option_ids: ['10101010-1010-4101-8101-101010101201'],
+							points: 100,
+							time_limit_seconds: 30
+						}
+					]
 				}
 			}
 		})
@@ -312,6 +348,47 @@ test('opens session setup and creates a live lobby with a join QR code and parti
 	await page.route('**/api/v1/auth/csrf', (route) =>
 		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
 	);
+	await page.route('**/api/v1/activities/quest-id/revisions', async (route) => {
+		const payload = route.request().postDataJSON() as {
+			revision: {
+				expected_version: number;
+				questions: Array<{
+					id: string;
+					prompt: string;
+					correct_option_id: string;
+					time_limit_seconds: number;
+				}>;
+			};
+		};
+		expect(payload.revision.expected_version).toBe(revisionCount + 1);
+		if (revisionCount === 0) {
+			expect(payload.revision.questions.map((question) => question.prompt)).toEqual([
+				'Updated Bravo question',
+				'Alpha question'
+			]);
+			expect(payload.revision.questions[0]?.correct_option_id).toBe(
+				'10101010-1010-4101-8101-101010101202'
+			);
+			expect(payload.revision.questions.map((question) => question.time_limit_seconds)).toEqual([
+				60, 45
+			]);
+		} else {
+			expect(payload.revision.questions[1]?.prompt).toBe('Auto-saved before launch');
+		}
+		revisionCount += 1;
+		await route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					activity_id: 'quest-id',
+					title: 'A live-ready quest',
+					version: revisionCount + 1,
+					share_code: revisionCount === 1 ? 'NEWA23' : 'NEXT23',
+					play_path: revisionCount === 1 ? '/play/NEWA23' : '/play/NEXT23'
+				}
+			}
+		});
+	});
 	await page.route('**/api/v1/activities/quest-id/game_rooms', (route) =>
 		route.fulfill({
 			status: 201,
@@ -373,9 +450,26 @@ test('opens session setup and creates a live lobby with a join QR code and parti
 	await expect(page.getByText('Instructor-paced live', { exact: true })).toBeVisible();
 	await page.getByRole('button', { name: 'Continue' }).click();
 	await expect(
+		page.getByRole('heading', { name: 'Review and refine your questions' })
+	).toBeVisible();
+	await expect(page.locator('.prompt-input')).toHaveCount(2);
+	await page.getByLabel('Time limit for every question in seconds').fill('45');
+	await page.getByRole('button', { name: 'Update all' }).click();
+	await expect(page.getByLabel('Time limit (seconds)').nth(1)).toHaveValue('45');
+	await page.getByRole('button', { name: 'Move question 2 up' }).click();
+	await page.locator('.prompt-input').first().fill('Updated Bravo question');
+	await page.getByLabel('Time limit (seconds)').first().fill('60');
+	await page.getByLabel('Mark option 2 as correct').first().check();
+	await page.getByRole('button', { name: 'Update quest' }).click();
+	await expect(page.getByRole('status')).toContainText(/Version 2 saved/);
+	expect(revisionCount).toBe(1);
+	await page.locator('.prompt-input').nth(1).fill('Auto-saved before launch');
+	await page.getByRole('button', { name: 'Continue' }).click();
+	await expect(
 		page.getByRole('heading', { name: 'Ready to bring everyone together?' })
 	).toBeVisible();
 	await page.getByRole('button', { name: 'Start now' }).click();
+	await expect.poll(() => revisionCount).toBe(2);
 
 	await expect(page.getByRole('heading', { name: 'A live-ready quest' })).toBeVisible();
 	await expect(page.getByText('KQST23', { exact: true })).toBeVisible();

@@ -504,6 +504,91 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/AuthenticationError"
+  /activities/{activity_id}/revisions:
+    parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: revisePublishedActivity
+      summary: Create a new immutable version of a published quest
+      description: >-
+        Replaces the latest creator-facing question list by creating a new
+        immutable version with a new share code. Existing versions, learner
+        attempts, and rooms keep their original snapshots and links. The
+        expected version prevents overwriting a concurrent revision.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision:
+                  type: object
+                  required: [expected_version, shuffle_questions, speed_scoring, questions]
+                  properties:
+                    expected_version:
+                      type: integer
+                      minimum: 1
+                    shuffle_questions:
+                      type: boolean
+                    speed_scoring:
+                      type: boolean
+                    questions:
+                      type: array
+                      minItems: 1
+                      items:
+                        allOf:
+                          - $ref: "#/components/schemas/QuestionDraft"
+                          - type: object
+                            required: [id]
+                            properties:
+                              id:
+                                type: string
+                                format: uuid
+      responses:
+        "201":
+          description: New immutable version and learner share code.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [activity_id, title, version, share_code, play_path]
+                    properties:
+                      activity_id:
+                        type: string
+                        format: uuid
+                      title:
+                        type: string
+                      version:
+                        type: integer
+                      share_code:
+                        type: string
+                        minLength: 6
+                        maxLength: 6
+                      play_path:
+                        type: string
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The latest version changed after the creator loaded it.
+        "422":
+          $ref: "#/components/responses/ValidationError"
   /play/{share_code}:
     parameters:
       - $ref: "#/components/parameters/ShareCode"
@@ -1136,6 +1221,7 @@ components:
               const: v1
     CreatorActivityDetail:
       type: object
+      description: Published quests use the latest immutable version snapshot; drafts use editable question rows.
       required:
         - id
         - title

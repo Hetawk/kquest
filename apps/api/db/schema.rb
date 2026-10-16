@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000007) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000008) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -38,6 +38,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000007) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.text "cover_image_url"
+    t.boolean "shuffle_questions", default: false, null: false
+    t.boolean "speed_scoring", default: true, null: false
     t.index ["activity_id", "version_number"], name: "index_activity_versions_on_activity_id_and_version_number", unique: true
     t.index ["activity_id"], name: "index_activity_versions_on_activity_id"
     t.index ["share_code"], name: "index_activity_versions_on_share_code", unique: true

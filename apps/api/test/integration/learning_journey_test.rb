@@ -175,6 +175,128 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "revises a published quest without changing its previous version or learner link" do
+    activity_id = create_activity(
+      questions: [
+        question_definition(prompt: "Alpha", time_limit_seconds: 15),
+        question_definition(prompt: "Bravo", time_limit_seconds: 30)
+      ]
+    )
+    original_publication = publish_activity(activity_id)
+    original_code = original_publication.fetch("share_code")
+    original_version = ActivityVersion.find_by!(share_code: original_code)
+    assert_equal [ "Alpha", "Bravo" ],
+      original_version.question_snapshot.map { |question| question.fetch("prompt") }
+    get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
+    assert_response :success
+    original_questions = response.parsed_body.dig("data", "questions")
+    revision_questions = [
+      original_questions.fetch(1),
+      original_questions.fetch(0).merge(
+        prompt: "Alpha, revised",
+        correct_option_id: original_questions.fetch(0).fetch("options").fetch(1).fetch("id"),
+        correct_option_ids: [ original_questions.fetch(0).fetch("options").fetch(1).fetch("id") ],
+        time_limit_seconds: 45
+      )
+    ]
+
+    post "/api/v1/activities/#{activity_id}/revisions",
+      params: {
+        revision: {
+          expected_version: 1,
+          shuffle_questions: false,
+          speed_scoring: false,
+          questions: revision_questions
+        }
+      },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+
+    assert_response :created
+    revised_publication = response.parsed_body.fetch("data")
+    assert_equal activity_id, revised_publication.fetch("activity_id")
+    assert_equal 2, revised_publication.fetch("version")
+    refute_equal original_code, revised_publication.fetch("share_code")
+
+    get "/api/v1/play/#{original_code}"
+    assert_response :success
+    assert_equal [ "Alpha", "Bravo" ],
+      response.parsed_body.dig("data", "questions").map { |question| question.fetch("prompt") }
+
+    get "/api/v1/play/#{revised_publication.fetch("share_code")}"
+    assert_response :success
+    revised_questions = response.parsed_body.dig("data", "questions")
+    assert_equal [ "Bravo", "Alpha, revised" ], revised_questions.map { |question| question.fetch("prompt") }
+    assert_equal [ 30, 45 ], revised_questions.map { |question| question.fetch("time_limit_seconds") }
+
+    get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
+    assert_response :success
+    creator_activity = response.parsed_body.fetch("data")
+    assert_equal 2, creator_activity.fetch("version")
+    assert_equal revised_publication.fetch("share_code"), creator_activity.fetch("share_code")
+    assert_equal false, ActivityVersion.find_by!(share_code: revised_publication.fetch("share_code")).shuffle_questions
+    assert_equal false, ActivityVersion.find_by!(share_code: revised_publication.fetch("share_code")).speed_scoring
+    assert_equal false, creator_activity.fetch("speed_scoring")
+    assert_equal [ "Bravo", "Alpha, revised" ],
+      creator_activity.fetch("questions").map { |question| question.fetch("prompt") }
+    assert_equal revision_questions.last.fetch("correct_option_id"),
+      creator_activity.fetch("questions").last.fetch("correct_option_id") do
+        "Creator details should return the revised correct answer."
+      end
+    refute_equal original_questions.first.fetch("correct_option_id"),
+      creator_activity.fetch("questions").last.fetch("correct_option_id")
+    assert_equal [ "Alpha", "Bravo" ],
+      Activity.find(activity_id).questions.map(&:prompt)
+  end
+
+  test "rejects stale quest revisions and revisions from another creator" do
+    activity_id = create_activity
+    publish_activity(activity_id)
+    get "/api/v1/activities/#{activity_id}", headers: { "Accept" => "application/json" }
+    question = response.parsed_body.dig("data", "questions", 0)
+    revision = {
+      expected_version: 1,
+      shuffle_questions: false,
+      speed_scoring: true,
+      questions: [ question ]
+    }
+    post "/api/v1/activities/#{activity_id}/revisions",
+      params: { revision: },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :created
+
+    post "/api/v1/activities/#{activity_id}/revisions",
+      params: { revision: },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :conflict
+    assert_equal "stale_activity_revision", response.parsed_body.dig("error", "code")
+
+    invalid_revision = revision.merge(
+      expected_version: 2,
+      questions: [ question.merge(time_limit_seconds: 301) ]
+    )
+    post "/api/v1/activities/#{activity_id}/revisions",
+      params: { revision: invalid_revision },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :unprocessable_entity
+    assert_equal 2, ActivityVersion.where(activity_id: activity_id).count
+
+    stranger = User.create!(
+      email: "revision-owner@example.test",
+      name: "Another Educator",
+      google_uid: "revision-owner-google-user"
+    )
+    stranger_activity = stranger.activities.create!(title: "Private quest")
+    post "/api/v1/activities/#{stranger_activity.id}/revisions",
+      params: { revision: },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :not_found
+  end
+
   test "publishes and scores a multiple-select question without exposing its answer key to learners" do
     definition = question_definition(time_limit_seconds: 0)
     correct_option_ids = [ definition.fetch(:options)[0].fetch(:id), definition.fetch(:options)[2].fetch(:id) ]

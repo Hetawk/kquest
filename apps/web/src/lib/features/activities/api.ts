@@ -7,8 +7,7 @@ import type {
 	PlaySession,
 	PlaySessionProgress,
 	PublishedActivity,
-	QuestionDraft,
-	ChoiceOption
+	QuestionDraft
 } from './types';
 
 type ApiEnvelope<T> = { data: T };
@@ -26,16 +25,9 @@ export type CreatorActivity = {
 	updated_at: string;
 	published_at: string | null;
 };
-export type CreatorQuestion = {
+export type CreatorQuestion = QuestionDraft & {
 	id: string;
 	position: number;
-	question_type: 'single_choice' | 'multiple_select';
-	prompt: string;
-	options: ChoiceOption[];
-	correct_option_id: string;
-	correct_option_ids: string[];
-	points: number;
-	time_limit_seconds: number;
 };
 export type CreatorActivityDetail = CreatorActivity & {
 	shuffle_questions: boolean;
@@ -185,6 +177,24 @@ export function publishActivity(activityId: string) {
 		method: 'POST',
 		body: JSON.stringify({})
 	});
+}
+
+export function reviseActivity(
+	activityId: string,
+	revision: {
+		expected_version: number;
+		shuffle_questions: boolean;
+		speed_scoring: boolean;
+		questions: Array<QuestionDraft & { id: string }>;
+	}
+) {
+	return request<PublishedActivity>(
+		`/api/v1/activities/${encodeURIComponent(activityId)}/revisions`,
+		{
+			method: 'POST',
+			body: JSON.stringify({ revision })
+		}
+	);
 }
 
 export function fetchActivity(shareCode: string) {

@@ -22,6 +22,7 @@ Rails.application.routes.draw do
       post "assets/upload", to: "assets#create"
       resources :activities, only: %i[index show create] do
         resources :publications, only: :create, controller: "publications"
+        post "revisions", to: "activities#revise"
       end
       post "activities/:activity_id/game_rooms", to: "game_rooms#create"
       get "game_rooms/:room_code", to: "game_rooms#show", as: :game_room

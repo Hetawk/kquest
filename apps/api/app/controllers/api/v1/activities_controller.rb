@@ -23,11 +23,11 @@ module Api
             title: activity.title,
             description: activity.description,
             status: activity.status,
-            question_count: activity.questions.size,
+            question_count: latest_version&.question_snapshot&.length || activity.questions.size,
             share_code: latest_version&.share_code,
             version: latest_version&.version_number,
             total_plays: plays_by_activity.fetch(activity.id, 0),
-            updated_at: activity.updated_at.iso8601,
+            updated_at: (latest_version&.created_at || activity.updated_at).iso8601,
             published_at: latest_version&.published_at&.iso8601
           }
         end
@@ -63,29 +63,72 @@ module Api
             title: activity.title,
             description: activity.description,
             status: activity.status,
-            question_count: activity.questions.size,
+            question_count: latest_version&.question_snapshot&.length || activity.questions.size,
             share_code: latest_version&.share_code,
             version: latest_version&.version_number,
             total_plays:,
-            updated_at: activity.updated_at.iso8601,
+            updated_at: (latest_version&.created_at || activity.updated_at).iso8601,
             published_at: latest_version&.published_at&.iso8601,
-            shuffle_questions: activity.shuffle_questions?,
-            speed_scoring: activity.speed_scoring?,
-            questions: activity.questions.map do |question|
-              {
-                id: question.id,
-                position: question.position,
-                question_type: question.question_type,
-                prompt: question.prompt,
-                options: question.options,
-                correct_option_id: question.correct_option_id,
-                correct_option_ids: question.correct_option_ids,
-                points: question.points,
-                time_limit_seconds: question.time_limit_seconds
-              }
-            end
+            shuffle_questions: latest_version ? latest_version.shuffle_questions : activity.shuffle_questions?,
+            speed_scoring: latest_version ? latest_version.speed_scoring : activity.speed_scoring?,
+            questions: creator_questions(activity, latest_version)
           }
         }
+      end
+
+      def revise
+        return unless current_user
+
+        activity = current_user.activities.includes(:activity_versions).find_by(id: params[:activity_id])
+        return render_not_found unless activity
+
+        attributes = params.require(:revision).permit(
+          :expected_version,
+          :shuffle_questions,
+          :speed_scoring,
+          questions: [
+            :id,
+            :question_type,
+            :prompt,
+            :correct_option_id,
+            :points,
+            :time_limit_seconds,
+            { correct_option_ids: [], options: [ :id, :text ] }
+          ]
+        )
+        version = Activities::Services::ReviseActivity.call(
+          activity:,
+          questions: attributes[:questions],
+          expected_version: attributes[:expected_version],
+          shuffle_questions: attributes[:shuffle_questions],
+          speed_scoring: attributes[:speed_scoring]
+        )
+        render(
+          json: {
+            data: {
+              activity_id: activity.id,
+              title: activity.title,
+              version: version.version_number,
+              share_code: version.share_code,
+              play_path: "/play/#{version.share_code}"
+            }
+          },
+          status: :created
+        )
+      rescue Activities::Services::ReviseActivity::StaleRevision
+        render_error(
+          code: "stale_activity_revision",
+          message: "This quest changed in another session. Reload it before applying your edits.",
+          status: :conflict
+        )
+      rescue ActiveRecord::RecordInvalid => error
+        render_validation_error(error.record)
+      rescue ActionController::ParameterMissing
+        render_error(
+          code: "validation_failed",
+          message: "The submitted revision is invalid.",
+          status: :unprocessable_entity
+        )
       end
 
       def create
@@ -163,6 +206,40 @@ module Api
           status: :unprocessable_entity,
           details: { activity: [ { code: "required", message: "Activity details are required." } ] }
         )
+      end
+
+      private
+
+      def creator_questions(activity, latest_version)
+        if latest_version
+          latest_version.question_snapshot.map do |question|
+            {
+              id: question.fetch("id"),
+              position: question.fetch("position"),
+              question_type: question.fetch("question_type", "single_choice"),
+              prompt: question.fetch("prompt"),
+              options: question.fetch("options"),
+              correct_option_id: question.fetch("correct_option_id"),
+              correct_option_ids: question.fetch("correct_option_ids", [ question.fetch("correct_option_id") ]),
+              points: question.fetch("points"),
+              time_limit_seconds: question.fetch("time_limit_seconds", 30)
+            }
+          end
+        else
+          activity.questions.map do |question|
+            {
+              id: question.id,
+              position: question.position,
+              question_type: question.question_type,
+              prompt: question.prompt,
+              options: question.options,
+              correct_option_id: question.correct_option_id,
+              correct_option_ids: question.correct_option_ids,
+              points: question.points,
+              time_limit_seconds: question.time_limit_seconds
+            }
+          end
+        end
       end
     end
   end

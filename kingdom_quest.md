@@ -807,11 +807,18 @@ workspace must focus a complete question-detail editor with its answer choices,
 correct-answer selection, points, and timing controls. Reordering questions
 must preserve question identity and be keyboard and screen-reader accessible.
 
-Published versions are immutable. "Copy and edit" creates a separately
-editable activity from the selected version; it must not mutate the questions
-or answer key used by existing share codes. There is no subscription-plan
-ceiling on the number of quests or participants. Apply technical safeguards
-for request size and service capacity separately from product quotas.
+Published versions are immutable. A creator may edit a published quest by
+reviewing its latest version and saving a new immutable version under the same
+quest. The new version receives a new share code; existing attempts, rooms,
+and previously shared codes remain bound to their original snapshots.
+"Duplicate" creates a separate editable activity. Before starting a session,
+the host can review, reorder, add, remove, and edit questions, answer choices,
+correct answers, points, and timing. The host can set one time limit for all
+questions or adjust each question individually. Starting with unsaved changes
+must save a new version before creating the room or opening the learner link.
+There is no subscription-plan ceiling on the number of quests or participants.
+Apply technical safeguards for request size and service capacity separately
+from product quotas.
 
 The content domain owns content lifecycle and versioning. It should not own the live-session lifecycle or implement scoring independently.
 
@@ -883,6 +890,7 @@ Each type should declare its own definition schema, response schema, evaluation 
 
 - New questions default to 30 seconds. Educators may set an individual limit from 5 to 300 seconds or turn the timer off (`0`) for that question.
 - The published activity version freezes each question's time limit, so later changes cannot alter an active or already-published quest.
+- In session setup, hosts can review and reorder the full question list, edit question content and answer keys, set a per-question limit, or apply one limit to every question. Saving or starting with unsaved edits creates a new immutable version before play begins; the new version uses a new share code while older codes continue to resolve to their original versions.
 - The API starts a play session and records each response in question order. The server decides whether the deadline has elapsed; a browser countdown is only a display.
 - A timed-out question is recorded as unanswered, earns zero points, and advances to the next question. A late answer cannot override the timeout.
 - The client retries session and answer requests with idempotency keys. A completed answer cannot be changed or submitted twice.
@@ -1037,7 +1045,7 @@ A published question must be reproducible.
 
 Each response references the precise question version presented to the learner. An attempt references the activity version or publication used for that attempt.
 
-When an educator edits a published activity, the platform creates a new version. Existing submissions remain associated with the original version.
+When an educator edits a published activity, the platform creates a new version with its own share code. Existing submissions and rooms remain associated with their original version, and old share codes continue to resolve to those immutable snapshots.
 
 ### 9.5 Score integrity
 

@@ -15,6 +15,8 @@ class ActivityVersion < ApplicationRecord
   validates :share_code, presence: true, uniqueness: true, length: { is: CODE_LENGTH }
   validates :question_snapshot, presence: true
   validates :published_at, presence: true
+  validates :shuffle_questions, inclusion: { in: [ true, false ] }
+  validates :speed_scoring, inclusion: { in: [ true, false ] }
   validate :published_version_is_immutable, if: :persisted?
   validate :share_code_is_not_used_by_a_room
 
