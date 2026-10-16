@@ -337,6 +337,12 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :created
     session_id = response.parsed_body.dig("data", "session_id")
 
+    get "/api/v1/game_rooms/#{room_code}"
+    assert_response :success
+    participant = response.parsed_body.dig("data", "participants").first
+    assert_equal "Jordan", participant.fetch("learner_name")
+    assert_equal false, participant.fetch("answered")
+
     patch "/api/v1/game_rooms/#{room_code}/participants/#{session_id}",
       params: { participant: { learner_name: "Jordan Updated" } },
       headers: { "X-CSRF-Token" => fetch_csrf_token },
@@ -362,6 +368,9 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       as: :json
     assert_response :success
     assert_operator response.parsed_body.dig("data", "points_awarded"), :>, 100
+    get "/api/v1/game_rooms/#{room_code}"
+    assert_response :success
+    assert_equal true, response.parsed_body.dig("data", "participants", 0, "answered")
 
     post "/api/v1/game_rooms/#{room_code}/advance",
       headers: { "X-CSRF-Token" => fetch_csrf_token },

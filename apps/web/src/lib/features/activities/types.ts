@@ -85,7 +85,7 @@ export type GameRoom = {
 	server_time: string;
 	participant_count: number;
 	answered_count: number;
-	participants: Array<{ learner_name: string; completed: boolean }>;
+	participants: Array<{ learner_name: string; completed: boolean; answered: boolean }>;
 	participant: { learner_name: string; answered: boolean } | null;
 	standings: LeaderboardEntry[];
 	podium: LeaderboardEntry[];

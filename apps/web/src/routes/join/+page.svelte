@@ -1,20 +1,37 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { resolveJoinCode } from '#lib/features/activities/api.js';
 
 	let code = $state('');
 	let error = $state('');
 	let resolving = $state(false);
 
+	onMount(() => {
+		const sharedCode = new URLSearchParams(window.location.search).get('code');
+		if (!sharedCode) return;
+
+		code = sharedCode;
+		void findGame(sharedCode);
+	});
+
+	function normalizedCode(value: string) {
+		return value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
+	}
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
-		const normalized = code.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '');
+		await findGame(code);
+	}
 
+	async function findGame(value: string) {
+		const normalized = normalizedCode(value);
 		if (normalized.length !== 6) {
 			error = 'A game code has 6 letters or numbers. Check with your teacher and try again.';
 			return;
 		}
+		if (resolving) return;
 
 		resolving = true;
 		error = '';

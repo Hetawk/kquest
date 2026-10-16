@@ -1460,7 +1460,7 @@ components:
           minimum: 0
     GameRoom:
       type: object
-      required: [room_code, title, status, question_index, question_count, current_question, time_remaining_seconds, server_time, participant_count, answered_count, participants, participant, standings, podium, standings_final]
+      required: [room_code, title, status, question_index, question_count, current_question, question_started_at, time_remaining_seconds, server_time, participant_count, answered_count, participants, participant, standings, podium, standings_final]
       properties:
         room_code:
           type: string
@@ -1475,6 +1475,9 @@ components:
           type: integer
         current_question:
           type: [object, "null"]
+        question_started_at:
+          type: [string, "null"]
+          format: date-time
         time_remaining_seconds:
           type: number
           minimum: 0
@@ -1489,12 +1492,15 @@ components:
           type: array
           items:
             type: object
-            required: [learner_name, completed]
+            required: [learner_name, completed, answered]
             properties:
               learner_name:
                 type: string
               completed:
                 type: boolean
+              answered:
+                type: boolean
+                description: Whether this participant answered the currently active question.
         participant:
           type: [object, "null"]
         standings:

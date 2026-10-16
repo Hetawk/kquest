@@ -3,7 +3,6 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import {
-		createGameRoom,
 		getCreatorActivity,
 		getCurrentUser,
 		publishActivity
@@ -69,16 +68,7 @@
 
 	async function openLiveRoom() {
 		if (!activity || busy || !activity.share_code) return;
-		busy = true;
-		error = '';
-		try {
-			const room = await createGameRoom(activity.id);
-			await goto(resolve('/host/room/[code]', { code: room.room_code }));
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The live room could not be opened.';
-		} finally {
-			busy = false;
-		}
+		await goto(resolve('/host/activities/[id]', { id: activity.id }));
 	}
 
 	async function copyAndEdit() {

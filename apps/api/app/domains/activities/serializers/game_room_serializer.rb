@@ -39,7 +39,14 @@ module Activities
           participant_count: sessions.length,
           answered_count: current_question ?
             sessions.count { |session| session.responses.any? { |response| response["question_id"] == current_question.fetch("id") } } : 0,
-          participants: sessions.map { |session| { learner_name: session.learner_name, completed: session.completed? } },
+          participants: sessions.map do |session|
+            {
+              learner_name: session.learner_name,
+              completed: session.completed?,
+              answered: current_question.present? &&
+                session.responses.any? { |response| response["question_id"] == current_question.fetch("id") }
+            }
+          end,
           participant: participant,
           standings: standings,
           podium: standings.first(3),

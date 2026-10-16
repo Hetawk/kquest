@@ -6,7 +6,6 @@
 	import QuestionEditor from '#lib/features/activities/components/QuestionEditor.svelte';
 	import { importQuestionFile } from '#lib/features/activities/importQuestions.js';
 	import {
-		createGameRoom,
 		createActivity,
 		getCreatorActivity,
 		getCurrentUser,
@@ -193,10 +192,9 @@
 		saving = true;
 		error = '';
 		try {
-			const room = await createGameRoom(published.activity_id);
-			await goto(resolve('/host/room/[code]', { code: room.room_code }));
+			await goto(resolve('/host/activities/[id]', { id: published.activity_id }));
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The live room could not be created.';
+			error = cause instanceof Error ? cause.message : 'Session setup could not be opened.';
 		} finally {
 			saving = false;
 		}

@@ -183,3 +183,151 @@ test('opens an owner quest workspace with question answers and overview tabs', a
 	);
 	await expect(page.locator('.prompt-input')).toHaveValue('Select both correct answers.');
 });
+
+test('opens session setup and creates a live lobby with a join QR code and participant roster', async ({
+	page
+}) => {
+	await page.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			json: {
+				data: { id: 'educator-id', email: 'educator@example.test', name: 'Educator' }
+			}
+		})
+	);
+	await page.route('**/api/v1/activities/quest-id', (route) =>
+		route.fulfill({
+			json: {
+				data: {
+					id: 'quest-id',
+					title: 'A live-ready quest',
+					description: '',
+					status: 'published',
+					question_count: 1,
+					share_code: 'ABCD23',
+					version: 1,
+					total_plays: 0,
+					updated_at: '2026-10-16T12:00:00Z',
+					published_at: '2026-10-16T12:00:00Z',
+					shuffle_questions: false,
+					speed_scoring: true,
+					questions: [{ time_limit_seconds: 30 }]
+				}
+			}
+		})
+	);
+	await page.route('**/api/v1/auth/csrf', (route) =>
+		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
+	);
+	await page.route('**/api/v1/activities/quest-id/game_rooms', (route) =>
+		route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					room_code: 'KQST23',
+					title: 'A live-ready quest',
+					status: 'waiting',
+					question_index: 0,
+					question_count: 1,
+					current_question: null,
+					question_started_at: null,
+					time_remaining_seconds: 0,
+					server_time: '2026-10-16T12:00:00Z',
+					participant_count: 2,
+					answered_count: 0,
+					participants: [
+						{ learner_name: 'Ada', completed: false, answered: false },
+						{ learner_name: 'Grace', completed: false, answered: false }
+					],
+					participant: null,
+					standings: [],
+					podium: [],
+					standings_final: false
+				}
+			}
+		})
+	);
+	await page.route('**/api/v1/game_rooms/KQST23', (route) =>
+		route.fulfill({
+			json: {
+				data: {
+					room_code: 'KQST23',
+					title: 'A live-ready quest',
+					status: 'waiting',
+					question_index: 0,
+					question_count: 1,
+					current_question: null,
+					question_started_at: null,
+					time_remaining_seconds: 0,
+					server_time: '2026-10-16T12:00:00Z',
+					participant_count: 2,
+					answered_count: 0,
+					participants: [
+						{ learner_name: 'Ada', completed: false, answered: false },
+						{ learner_name: 'Grace', completed: false, answered: false }
+					],
+					participant: null,
+					standings: [],
+					podium: [],
+					standings_final: false
+				}
+			}
+		})
+	);
+
+	await page.goto('/host/activities/quest-id');
+	await expect(page.getByRole('heading', { name: 'How should the group play?' })).toBeVisible();
+	await expect(page.getByText('Instructor-paced live', { exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Continue' }).click();
+	await expect(
+		page.getByRole('heading', { name: 'Ready to bring everyone together?' })
+	).toBeVisible();
+	await page.getByRole('button', { name: 'Start now' }).click();
+
+	await expect(page.getByRole('heading', { name: 'A live-ready quest' })).toBeVisible();
+	await expect(page.getByText('KQST23', { exact: true })).toBeVisible();
+	await expect(page.getByRole('img', { name: 'QR code to join game KQST23' })).toBeVisible();
+	await expect(page.getByRole('link', { name: /\/join\?code=KQST23/ })).toHaveAttribute(
+		'href',
+		/\/join\?code=KQST23/
+	);
+	await expect(page.getByText('Ada')).toBeVisible();
+	await expect(page.getByText('Grace')).toBeVisible();
+	await expect(page.getByText('✦').first()).toBeVisible();
+});
+
+test('resolves a QR invite from the stable join URL to the room display-name form', async ({
+	page
+}) => {
+	await page.route('**/api/v1/join/KQST23', (route) =>
+		route.fulfill({ json: { data: { kind: 'live_room', path: '/room/KQST23' } } })
+	);
+	await page.route('**/api/v1/game_rooms/KQST23', (route) =>
+		route.fulfill({
+			json: {
+				data: {
+					room_code: 'KQST23',
+					title: 'Phone join test',
+					status: 'waiting',
+					question_index: 0,
+					question_count: 1,
+					current_question: null,
+					question_started_at: null,
+					time_remaining_seconds: 0,
+					server_time: '2026-10-16T12:00:00Z',
+					participant_count: 0,
+					answered_count: 0,
+					participants: [],
+					participant: null,
+					standings: [],
+					podium: [],
+					standings_final: false
+				}
+			}
+		})
+	);
+
+	await page.goto('/join?code=KQST23');
+	await expect(page).toHaveURL(/\/room\/KQST23$/);
+	await expect(page.getByRole('heading', { name: 'Phone join test' })).toBeVisible();
+	await expect(page.getByLabel('Your display name')).toBeVisible();
+});

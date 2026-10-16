@@ -2,7 +2,6 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import {
-		createGameRoom,
 		getCurrentUser,
 		listCreatorActivities,
 		publishActivity
@@ -76,9 +75,9 @@
 		error = '';
 		notice = '';
 		try {
-			await navigator.clipboard.writeText(
-				`${window.location.origin}${resolve('/join/[code]', { code: activity.share_code })}`
-			);
+			const url = new URL(resolve('/join'), window.location.origin);
+			url.searchParams.set('code', activity.share_code);
+			await navigator.clipboard.writeText(url.toString());
 			notice = `Join link for ${activity.title} copied.`;
 		} catch {
 			error = 'Copying is unavailable here. Share the game code instead.';
@@ -103,16 +102,7 @@
 
 	async function openLiveRoom(activity: CreatorActivity) {
 		if (!activity.share_code || busyActivityId) return;
-		busyActivityId = activity.id;
-		error = '';
-		try {
-			const room = await createGameRoom(activity.id);
-			window.location.assign(resolve('/host/room/[code]', { code: room.room_code }));
-		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The live room could not be opened.';
-		} finally {
-			busyActivityId = '';
-		}
+		window.location.assign(resolve('/host/activities/[id]', { id: activity.id }));
 	}
 
 	function formatDate(value: string) {
