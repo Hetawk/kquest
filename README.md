@@ -74,19 +74,23 @@ credentials or learner data.
 
 The first end-to-end flow supports creating and publishing a single-choice
 quest, joining by share code, answering questions, and viewing a server-graded
-result. Sign-in uses Google OAuth with opaque, database-backed sessions in
-encrypted, HTTP-only, same-site cookies. Google email addresses must be
-verified; account linking by matching email is deliberately not automatic.
-Activity ownership is tied to the signed-in user.
+result. Sign-in supports Google OAuth and email/password accounts with
+opaque, database-backed sessions in encrypted, HTTP-only, same-site cookies.
+Email accounts must verify a one-time code before sign-in; password recovery
+uses a separate one-time code. Google email addresses must be verified;
+account linking by matching email is deliberately not automatic. Activity
+ownership is tied to the signed-in user.
 
 OAuth and provider configuration is loaded only by the Rails server. Set
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and
 `WEB_APP_URL` in the ignored root `.env`, and register the redirect URI with
 Google. The callback must exactly match `GOOGLE_REDIRECT_URI`.
 
-New accounts enqueue a welcome message through EKDSend. Configure
+Verification, recovery, and welcome messages use EKDSend. Configure
 `EKDSEND_API_URL`, `EKDSEND_API_KEY`, and `FROM_EMAIL`; production mail jobs use
-Solid Queue, so run `apps/api/bin/jobs start` alongside the API.
+Solid Queue, so run `apps/api/bin/jobs start` alongside the API. Verification
+and recovery codes expire after 10 minutes, allow five attempts, and are
+rate-limited; passwords must be at least 12 characters and at most 72 bytes.
 
 Educators can optionally upload PNG, JPEG, or WebP quest cover images (up to
 5 MB) through the authenticated Rails API proxy. Configure `ASSETS_API_URL`
@@ -111,12 +115,13 @@ quest ends. Howler.js is loaded only in the browser through Svelte's mount
 lifecycle. The generated assets can be recreated with
 `python3 apps/web/scripts/generate-audio-assets.py`.
 
-The authentication foundation is live, but organization roles, educator
-authorization policies, account recovery, API rate limits, and learner abuse
-protections are not complete. Activity authoring, asset upload, gameplay
-lookup, and play sessions therefore remain available only in Rails
-development and test; they return `404` in production. Do not expose the
-prototype content APIs as a production service yet.
+The authentication foundation supports Google OAuth, email registration and
+verification, password sign-in, and password recovery. Organization roles,
+educator authorization policies, and learner abuse protections are not
+complete. Activity authoring, asset upload, gameplay lookup, and play sessions
+therefore remain available only in Rails development and test; they return
+`404` in production. Do not expose the prototype content APIs as a production
+service yet.
 
 The decorative Three.js scene is not required for gameplay and respects reduced
 motion preferences. The API contract is in [`docs/api/openapi.yaml`](./docs/api/openapi.yaml).

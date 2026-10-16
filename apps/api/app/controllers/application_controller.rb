@@ -37,7 +37,7 @@ class ApplicationController < ActionController::API
 
     render_error(
       code: "authentication_required",
-      message: "Sign in with Google to continue.",
+      message: "Sign in to continue.",
       status: :unauthorized
     )
   end

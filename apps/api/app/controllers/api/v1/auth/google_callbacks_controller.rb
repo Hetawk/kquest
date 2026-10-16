@@ -10,7 +10,8 @@ module Api
           new_user = user.new_record?
           user.assign_attributes(
             email: auth.info.email.to_s.downcase,
-            name: auth.info.name.to_s.presence || auth.info.email.to_s.split("@").first
+            name: auth.info.name.to_s.presence || auth.info.email.to_s.split("@").first,
+            email_verified_at: Time.current
           )
           return redirect_to_frontend("account_suspended") if user.persisted? && !user.active?
 

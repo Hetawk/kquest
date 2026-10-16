@@ -11,6 +11,12 @@ Rails.application.routes.draw do
       get "auth/csrf", to: "csrf#show"
       get "me", to: "me#show"
       delete "auth/session", to: "auth/sessions#destroy"
+      post "auth/email/register", to: "auth/email#register"
+      post "auth/email/login", to: "auth/email#login"
+      post "auth/email/verify", to: "auth/email#verify"
+      post "auth/email/resend-verification", to: "auth/email#resend_verification"
+      post "auth/password/forgot", to: "auth/email#forgot_password"
+      post "auth/password/reset", to: "auth/email#reset_password"
       match "auth/google_oauth2/callback", to: "auth/google_callbacks#create", via: %i[get post]
       get "auth/failure", to: "auth/google_callbacks#failure"
       post "assets/upload", to: "assets#create"

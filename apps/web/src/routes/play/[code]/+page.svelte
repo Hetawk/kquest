@@ -359,7 +359,8 @@
 				Soft ambient sounds start with your quest. You can turn them off anytime.
 			</p>
 			<p class="guest-choice">
-				Join as a guest without an account, or <a href={resolve('/')}>sign in with Google</a> if you prefer.
+				Join as a guest without an account, or
+				<a href={resolve('/auth')}>sign in to your account</a> if you prefer.
 			</p>
 
 			<form class="welcome-form" onsubmit={beginGame}>

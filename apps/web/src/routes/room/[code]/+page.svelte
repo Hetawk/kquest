@@ -239,8 +239,7 @@
 				</button>
 			</form>
 			<p class="guest-note">
-				Want an account? <a href={resolve('/')}>Sign in with Google</a> first, or continue here without
-				one.
+				Want an account? <a href={resolve('/auth')}>Sign in</a> first, or continue here without one.
 			</p>
 			<p>{room.participant_count} players are in this room.</p>
 		</section>

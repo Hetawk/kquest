@@ -7,8 +7,8 @@ class SendWelcomeEmailJob < ApplicationJob
     return unless user
 
     name = ERB::Util.html_escape(user.name)
-    html = "<p>Welcome to KINGDOM Quest, #{name}.</p><p>Your Google account is ready to use.</p>"
-    text = "Welcome to KINGDOM Quest, #{user.name}. Your Google account is ready to use."
+    html = "<p>Welcome to KINGDOM Quest, #{name}.</p><p>Your account is ready to use.</p>"
+    text = "Welcome to KINGDOM Quest, #{user.name}. Your account is ready to use."
     Integrations::EkdSend::Client.new.send_email(
       to: user.email,
       subject: "Welcome to KINGDOM Quest",

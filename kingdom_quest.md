@@ -613,17 +613,25 @@ audit events, platform settings
 
 ### 7.3 Authentication and user endpoints
 
-| Method | Endpoint                       | Purpose                                     |
-| ------ | ------------------------------ | ------------------------------------------- |
-| POST   | `/auth/registrations`          | Register a user.                            |
-| POST   | `/auth/sessions`               | Authenticate and create a session.          |
-| DELETE | `/auth/sessions/current`       | End the current session.                    |
-| POST   | `/auth/password-resets`        | Request password recovery.                  |
-| PATCH  | `/auth/password-resets/:token` | Complete password recovery.                 |
-| GET    | `/me`                          | Get the current user's profile.             |
-| PATCH  | `/me`                          | Update permitted profile fields.            |
-| GET    | `/users/:id`                   | Retrieve an authorized user representation. |
-| PATCH  | `/users/:id`                   | Update permitted user fields.               |
+| Method | Endpoint                             | Purpose                                                |
+| ------ | ------------------------------------ | ------------------------------------------------------ |
+| POST   | `/auth/email/register`               | Register an email/password user and send verification. |
+| POST   | `/auth/email/verify`                  | Verify a six-digit, one-time email code and sign in.    |
+| POST   | `/auth/email/resend-verification`     | Resend an email verification code.                     |
+| POST   | `/auth/email/login`                   | Authenticate a verified email/password user.            |
+| POST   | `/auth/password/forgot`               | Request a password reset code.                         |
+| POST   | `/auth/password/reset`                | Verify the code, change password, and rotate sessions.  |
+| POST   | `/auth/google_oauth2`                 | Begin Google OAuth sign-in.                            |
+| DELETE | `/auth/session`                       | Revoke the current session.                            |
+| GET    | `/me`                                 | Get the current user's profile.                        |
+| PATCH  | `/me`                                 | Update permitted profile fields.                       |
+| GET    | `/users/:id`                          | Retrieve an authorized user representation.           |
+| PATCH  | `/users/:id`                          | Update permitted user fields.                          |
+
+Email codes expire after ten minutes, allow at most five attempts, and are
+issued with per-address cooldown and hourly limits. Passwords require at least
+12 characters and are limited to 72 bytes for bcrypt compatibility. Password
+recovery responses do not reveal whether an email address has an account.
 
 Authentication routes may be handled by a dedicated authentication library, but the external API contract should remain consistent with the rest of the platform.
 
@@ -757,7 +765,15 @@ Support learner, educator, organization administrator, and platform administrato
 
 Core features:
 
-- Registration and sign-in.
+- Email registration with a six-digit, expiring verification code before the
+  account can sign in.
+- Email and password sign-in, with Google OAuth available as an alternative.
+- Password recovery through a separate, expiring one-time email code; responses
+  must not reveal whether an email/password account exists.
+- Resend cooldowns, attempt limits, and rate limits for authentication codes
+  and password sign-in.
+- Revocable sessions in secure, HTTP-only cookies; password recovery revokes
+  existing sessions before establishing the new session.
 - Profile management.
 - Organization invitations.
 - Membership and role management.

@@ -55,7 +55,7 @@ export async function getCsrfToken(): Promise<string> {
 	return csrfTokenRequest;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	let response: Response;
 	const method = init?.method?.toUpperCase() ?? 'GET';
 	const headers = new Headers(init?.headers);

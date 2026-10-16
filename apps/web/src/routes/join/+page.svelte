@@ -72,8 +72,8 @@
 		<div class="join-choice">
 			<strong>Choose how to join</strong>
 			<p>
-				Play as a guest with no account, or <a href={resolve('/')}>sign in with Google</a> if you prefer.
-				Guest play is always available.
+				Play as a guest with no account, or
+				<a href={resolve('/auth')}>sign in to your account</a> if you prefer. Guest play is always available.
 			</p>
 		</div>
 		<p class="join-footer">

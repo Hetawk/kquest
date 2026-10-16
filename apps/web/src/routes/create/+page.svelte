@@ -194,9 +194,18 @@
 			<p class="eyebrow">Your learning studio</p>
 			<h1 id="signin-title">Sign in to create a quest.</h1>
 			<p class="published-copy">
-				Use your Google account to save and manage the learning activities you create.
+				Create an account or sign in with email and password, or continue with Google.
 			</p>
-			<a class="button button-primary" href={resolve('/')}>Sign in with Google</a>
+			<a
+				class="button button-primary"
+				href={resolve('/auth')}
+				onclick={(event) => {
+					event.preventDefault();
+					window.location.assign(`${resolve('/auth')}?next=%2Fcreate`);
+				}}
+			>
+				Sign in or create an account
+			</a>
 			{#if error}<p class="error-message" role="alert">{error}</p>{/if}
 		</section>
 	{:else if published}

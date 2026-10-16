@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_16_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -26,7 +26,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
     t.boolean "speed_scoring", default: true, null: false
     t.index ["uploaded_asset_id"], name: "index_activities_on_uploaded_asset_id"
     t.index ["user_id"], name: "index_activities_on_user_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'published'::character varying]::text[])", name: "activities_status_valid"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'published'::character varying::text])", name: "activities_status_valid"
   end
 
   create_table "activity_versions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -64,6 +64,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
     t.check_constraint "score >= 0 AND score <= max_score", name: "attempts_score_valid"
   end
 
+  create_table "auth_challenges", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id"
+    t.string "email", null: false
+    t.string "purpose", null: false
+    t.string "code_digest", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "consumed_at"
+    t.datetime "last_sent_at", null: false
+    t.integer "attempts", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email", "purpose", "created_at"], name: "index_auth_challenges_on_email_and_purpose_and_created_at"
+    t.index ["expires_at"], name: "index_auth_challenges_on_expires_at"
+    t.index ["user_id"], name: "index_auth_challenges_on_user_id"
+    t.check_constraint "attempts >= 0 AND attempts <= 5", name: "auth_challenges_attempts_range"
+  end
+
   create_table "game_rooms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "activity_version_id", null: false
     t.uuid "host_user_id", null: false
@@ -78,7 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
     t.index ["host_user_id"], name: "index_game_rooms_on_host_user_id"
     t.index ["room_code"], name: "index_game_rooms_on_room_code", unique: true
     t.check_constraint "current_question_index >= 0", name: "game_rooms_question_index_nonnegative"
-    t.check_constraint "status::text = ANY (ARRAY['waiting'::character varying, 'active'::character varying, 'completed'::character varying]::text[])", name: "game_rooms_status_valid"
+    t.check_constraint "status::text = ANY (ARRAY['waiting'::character varying::text, 'active'::character varying::text, 'completed'::character varying::text])", name: "game_rooms_status_valid"
   end
 
   create_table "play_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -149,12 +166,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
   end
 
   create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.string "google_uid", null: false
+    t.string "google_uid"
     t.string "email", null: false
     t.string "name", null: false
     t.datetime "suspended_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "password_digest"
+    t.datetime "email_verified_at"
     t.index "lower((email)::text)", name: "index_users_on_lower_email", unique: true
     t.index ["google_uid"], name: "index_users_on_google_uid", unique: true
   end
@@ -164,6 +183,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_16_000005) do
   add_foreign_key "activity_versions", "activities"
   add_foreign_key "attempts", "activity_versions"
   add_foreign_key "attempts", "game_rooms"
+  add_foreign_key "auth_challenges", "users"
   add_foreign_key "game_rooms", "activity_versions"
   add_foreign_key "game_rooms", "users", column: "host_user_id"
   add_foreign_key "play_sessions", "activity_versions"

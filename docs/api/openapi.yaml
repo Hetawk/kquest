@@ -3,8 +3,9 @@ info:
   title: KINGDOM Quest API
   version: 1.0.0
   description: >-
-    Versioned REST API for KINGDOM Quest. Google OAuth uses an HTTP-only
-    session cookie; state-changing requests require a Rails CSRF token.
+    Versioned REST API for KINGDOM Quest. Google OAuth and email/password
+    authentication use an HTTP-only session cookie; state-changing requests
+    require a Rails CSRF token.
     Content, upload, and learner-play prototype endpoints remain development
     and test only until roles and abuse protections are complete.
 servers:
@@ -40,6 +41,162 @@ paths:
                   properties:
                     data:
                       $ref: "#/components/schemas/CsrfToken"
+  /auth/email/register:
+    post:
+      operationId: registerWithEmail
+      summary: Create an email account and send a verification code
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRegistration"
+      responses:
+        "201":
+          description: Account created; verify the email address before signing in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailVerificationRequired"
+        "409":
+          $ref: "#/components/responses/ValidationError"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          description: Code request limit exceeded.
+        "503":
+          description: Email delivery is temporarily unavailable.
+  /auth/email/login:
+    post:
+      operationId: signInWithEmail
+      summary: Sign in with a verified email and password
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailPasswordCredentials"
+      responses:
+        "200":
+          description: Signed in; an encrypted session cookie is set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Encrypted, HTTP-only, same-site session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "401":
+          description: Email or password is incorrect.
+        "403":
+          description: Email is not verified or the account is inactive.
+        "429":
+          description: Sign-in attempt limit exceeded.
+  /auth/email/verify:
+    post:
+      operationId: verifyEmail
+      summary: Verify an email address with a one-time code
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailCode"
+      responses:
+        "200":
+          description: Email verified and signed in; an encrypted session cookie is set.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Encrypted, HTTP-only, same-site session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /auth/email/resend-verification:
+    post:
+      operationId: resendEmailVerification
+      summary: Request another email verification code
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAddress"
+      responses:
+        "200":
+          description: Generic response that does not disclose account state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "429":
+          description: Code request cooldown or limit exceeded.
+        "503":
+          description: Email delivery is temporarily unavailable.
+  /auth/password/forgot:
+    post:
+      operationId: requestPasswordReset
+      summary: Request a one-time password reset code
+      description: Always returns a generic response to avoid disclosing whether an email/password account exists.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailAddress"
+      responses:
+        "200":
+          description: Generic response whether or not an email/password account exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "429":
+          description: Code request cooldown or limit exceeded.
+        "503":
+          description: Email delivery is temporarily unavailable.
+  /auth/password/reset:
+    post:
+      operationId: resetPassword
+      summary: Set a new password using a one-time code
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordReset"
+      responses:
+        "200":
+          description: Password changed and signed in; previous sessions are revoked.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: Encrypted, HTTP-only, same-site session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfileResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
   /auth/google_oauth2:
     post:
       operationId: startGoogleSignIn
@@ -734,6 +891,91 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
   schemas:
+    EmailAddress:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+    EmailRegistration:
+      allOf:
+        - $ref: "#/components/schemas/EmailAddress"
+        - type: object
+          required: [name, password, password_confirmation]
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 160
+            password:
+              type: string
+              minLength: 12
+              description: Maximum 72 UTF-8 bytes.
+            password_confirmation:
+              type: string
+    EmailPasswordCredentials:
+      allOf:
+        - $ref: "#/components/schemas/EmailAddress"
+        - type: object
+          required: [password]
+          properties:
+            password:
+              type: string
+              minLength: 12
+              description: Maximum 72 UTF-8 bytes.
+    EmailCode:
+      allOf:
+        - $ref: "#/components/schemas/EmailAddress"
+        - type: object
+          required: [code]
+          properties:
+            code:
+              type: string
+              pattern: "^\\d{6}$"
+    PasswordReset:
+      allOf:
+        - $ref: "#/components/schemas/EmailCode"
+        - type: object
+          required: [password, password_confirmation]
+          properties:
+            password:
+              type: string
+              minLength: 12
+              description: Maximum 72 UTF-8 bytes.
+            password_confirmation:
+              type: string
+    EmailVerificationRequired:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [verification_required, email]
+          properties:
+            verification_required:
+              type: boolean
+              const: true
+            email:
+              type: string
+              format: email
+    MessageResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+    UserProfileResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/UserProfile"
     CsrfToken:
       type: object
       required: [token]

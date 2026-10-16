@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { getCsrfToken, getCurrentUser, signOut } from '#lib/features/activities/api.js';
+	import { getCurrentUser, signOut } from '#lib/features/activities/api.js';
 	import '../app.css';
 	import '@fontsource-variable/dm-sans';
 	import '@fontsource-variable/manrope';
@@ -10,7 +10,6 @@
 
 	let { children }: LayoutProps = $props();
 	let currentUser = $state<Awaited<ReturnType<typeof getCurrentUser>>>(null);
-	let csrfToken = $state('');
 	let authError = $state('');
 	let authNotice = $state('');
 
@@ -18,7 +17,7 @@
 		const status = new URLSearchParams(window.location.search).get('auth');
 		authNotice =
 			status === 'signed_in'
-				? 'You are signed in with Google.'
+				? 'You are signed in.'
 				: status === 'account_conflict'
 					? 'That email is already linked to another sign-in. Contact support to connect accounts.'
 					: status === 'account_suspended'
@@ -27,10 +26,9 @@
 							? 'Google sign-in did not complete. Please try again.'
 							: '';
 
-		void Promise.all([getCurrentUser(), getCsrfToken()])
-			.then(([user, token]) => {
+		void getCurrentUser()
+			.then((user) => {
 				currentUser = user;
-				csrfToken = token;
 			})
 			.catch((error: unknown) => {
 				authError =
@@ -46,7 +44,6 @@
 			await signOut();
 			currentUser = null;
 			authNotice = 'You have signed out.';
-			csrfToken = await getCsrfToken();
 		} catch (error) {
 			authError = error instanceof Error ? error.message : 'Could not safely end this session.';
 		}
@@ -79,12 +76,7 @@
 				<button class="header-cta" type="button" onclick={handleSignOut}>Sign out</button>
 			</div>
 		{:else}
-			<form class="google-sign-in" action="/api/v1/auth/google_oauth2" method="post">
-				<input type="hidden" name="authenticity_token" value={csrfToken} />
-				<button class="header-cta" type="submit" disabled={!csrfToken}>
-					Continue with Google <span aria-hidden="true">↗</span>
-				</button>
-			</form>
+			<a class="header-cta" href={resolve('/auth')}>Sign in</a>
 		{/if}
 	</div>
 </header>
@@ -194,7 +186,6 @@
 		opacity: 0.65;
 	}
 
-	.google-sign-in,
 	.account-actions {
 		display: flex;
 		align-items: center;
@@ -220,11 +211,6 @@
 	.header-cta:hover {
 		transform: translateY(-1px);
 		border-color: #d2c4a8;
-	}
-
-	.header-cta span {
-		margin-left: 0.3rem;
-		color: var(--gold-deep);
 	}
 
 	@media (max-width: 560px) {
