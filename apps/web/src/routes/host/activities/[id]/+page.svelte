@@ -2,7 +2,10 @@
 	import { resolve } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import questionTemplateUrl from '#lib/assets/question-import-template.csv?url';
+	import niaQuestionsUrl from '../../../../../docs/questions.csv?url';
 	import QuestionEditor from '#lib/features/activities/components/QuestionEditor.svelte';
+	import { importQuestionFile } from '#lib/features/activities/importQuestions.js';
 	import {
 		createGameRoom,
 		getCreatorActivity,
@@ -24,6 +27,7 @@
 	let loading = $state(true);
 	let starting = $state(false);
 	let saving = $state(false);
+	let importing = $state(false);
 	let bulkTimeLimit = $state('30');
 	let error = $state('');
 	let notice = $state('');
@@ -40,6 +44,7 @@
 					return;
 				}
 				activity = await getCreatorActivity(data.activityId);
+				if (data.editMode) step = 'questions';
 				questions = activity.questions.map((question) => ({
 					...question,
 					options: question.options.map((option) => ({ ...option })),
@@ -76,7 +81,6 @@
 	}
 
 	function removeQuestion(index: number) {
-		if (questions.length <= 1) return;
 		questions = questions.filter((_, currentIndex) => currentIndex !== index);
 	}
 
@@ -117,8 +121,37 @@
 		}));
 	}
 
+	async function handleQuestionsImported(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+
+		error = '';
+		notice = '';
+		importing = true;
+		try {
+			const imported = await importQuestionFile(file);
+			if (questions.length + imported.length > 100) {
+				throw new Error('A quest can contain up to 100 questions.');
+			}
+			questions = [
+				...questions,
+				...imported.map((question) => ({ ...question, id: crypto.randomUUID() }))
+			];
+			notice = `Imported ${imported.length} questions. Review and edit them before saving.`;
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'The question file could not be imported.';
+		} finally {
+			importing = false;
+			input.value = '';
+		}
+	}
+
 	async function persistRevision() {
 		if (!activity || !hasChanges) return;
+		if (questions.length === 0) {
+			throw new Error('Add at least one question before saving this quest.');
+		}
 		const savedAt = new Date().toISOString();
 		const updatedQuestions = questions.map((question, index) => ({
 			...question,
@@ -151,6 +184,9 @@
 		notice = '';
 		try {
 			await persistRevision();
+			if (data.editMode) {
+				await goto(resolve('/dashboard/quests/[id]', { id: data.activityId }));
+			}
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Your quest revision could not be saved.';
 		} finally {
@@ -165,6 +201,9 @@
 		notice = '';
 		try {
 			if (hasChanges) await persistRevision();
+			if (questions.length === 0) {
+				throw new Error('Add at least one question before starting this session.');
+			}
 			if (mode === 'host_paced') {
 				const room = await createGameRoom(activity.id);
 				await goto(resolve('/host/room/[code]', { code: room.room_code }));
@@ -185,8 +224,10 @@
 <svelte:head>
 	<title
 		>{activity
-			? `Start ${activity.title} — KINGDOM Quest`
-			: 'Start a session — KINGDOM Quest'}</title
+			? `${data.editMode ? 'Edit' : 'Start'} ${activity.title} — KINGDOM Quest`
+			: data.editMode
+				? 'Edit quest — KINGDOM Quest'
+				: 'Start a session — KINGDOM Quest'}</title
 	>
 	<meta name="robots" content="noindex" />
 </svelte:head>
@@ -214,18 +255,26 @@
 	{:else}
 		<div class="setup-heading">
 			<div>
-				<p class="eyebrow">START A SESSION</p>
+				<p class="eyebrow">{data.editMode ? 'EDIT QUEST' : 'START A SESSION'}</p>
 				<h1>{activity.title}</h1>
-				<p>Choose how your learners will experience this quest.</p>
+				<p>
+					{data.editMode
+						? 'Update questions, answers, and timing for the next version.'
+						: 'Choose how your learners will experience this quest.'}
+				</p>
 			</div>
-			<div class="step-count">
-				<span>{step === 'mode' ? '01' : step === 'questions' ? '02' : '03'}</span> / 03
+			{#if !data.editMode}
+				<div class="step-count">
+					<span>{step === 'mode' ? '01' : step === 'questions' ? '02' : '03'}</span> / 03
+				</div>
+			{/if}
+		</div>
+		{#if !data.editMode}
+			<div class="step-track" aria-hidden="true">
+				<span class:half={step === 'questions'} class:complete={step === 'settings'}></span>
 			</div>
-		</div>
-		<div class="step-track" aria-hidden="true">
-			<span class:half={step === 'questions'} class:complete={step === 'settings'}></span>
-		</div>
-		{#if step === 'mode'}
+		{/if}
+		{#if !data.editMode && step === 'mode'}
 			<section class="setup-card" aria-labelledby="mode-heading">
 				<p class="eyebrow">PLAY STYLE</p>
 				<h2 id="mode-heading">How should the group play?</h2>
@@ -258,12 +307,38 @@
 			</section>
 		{:else if step === 'questions'}
 			<section class="setup-card question-review" aria-labelledby="questions-heading">
-				<p class="eyebrow">QUEST CONTENT · {questions.length} QUESTIONS</p>
-				<h2 id="questions-heading">Review and refine your questions</h2>
-				<p class="section-copy">
-					Reorder questions, adjust answer choices and correct answers, or set timing for the whole
-					quest or individual questions.
+				<p class="eyebrow">
+					{data.editMode ? 'EDIT QUEST' : 'QUEST CONTENT'} · {questions.length} QUESTIONS
 				</p>
+				<h2 id="questions-heading">
+					{data.editMode ? 'Edit your questions' : 'Review and refine your questions'}
+				</h2>
+				<p class="section-copy">
+					{data.editMode
+						? 'Reorder, add, remove, and edit questions or import them from a spreadsheet. Your changes will create a new quest version.'
+						: 'Reorder questions, adjust answer choices and correct answers, or set timing for the whole quest or individual questions.'}
+				</p>
+				<div class="import-panel">
+					<div>
+						<strong>Import questions from a file</strong>
+						<p>Upload a CSV or Excel workbook (.xlsx), then review the imported questions here.</p>
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a href={questionTemplateUrl} download>Download the CSV template</a>
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a href={niaQuestionsUrl} download>Download NIA example questions (40)</a>
+					</div>
+					<label class="button button-outline import-button" for="revision-question-import">
+						{importing ? 'Reading file…' : 'Import CSV / XLSX'}
+					</label>
+					<input
+						id="revision-question-import"
+						class="visually-hidden"
+						type="file"
+						accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+						onchange={handleQuestionsImported}
+						disabled={importing || saving || starting}
+					/>
+				</div>
 				<div class="bulk-timing">
 					<div>
 						<strong>Set time for every question</strong>
@@ -297,11 +372,22 @@
 							onMoveDown={() => moveQuestion(index, 1)}
 							canMoveUp={index > 0}
 							canMoveDown={index < questions.length - 1}
-							canRemove={questions.length > 1}
+							canRemove={true}
 						/>
 					{/each}
+					{#if questions.length === 0}
+						<div class="empty-questions">
+							<strong>No questions yet</strong>
+							<p>Add a question or import a CSV/XLSX file to continue.</p>
+						</div>
+					{/if}
 				</div>
-				<button class="button button-outline add-question" type="button" onclick={addQuestion}>
+				<button
+					class="button button-outline add-question"
+					type="button"
+					onclick={addQuestion}
+					disabled={questions.length >= 100 || importing || saving || starting}
+				>
 					+ Add a question
 				</button>
 				<p class="revision-note">
@@ -311,20 +397,29 @@
 				{#if error}<p class="error-message" role="alert">{error}</p>{/if}
 				{#if notice}<p class="success-message" role="status">{notice}</p>{/if}
 				<div class="step-actions">
-					<button class="button button-outline" type="button" onclick={() => (step = 'mode')}
-						>← Back</button
-					>
+					{#if data.editMode}
+						<a
+							class="button button-outline"
+							href={resolve('/dashboard/quests/[id]', { id: activity.id })}>Cancel</a
+						>
+					{:else}
+						<button class="button button-outline" type="button" onclick={() => (step = 'mode')}
+							>← Back</button
+						>
+					{/if}
 					<button
 						class="button button-outline"
 						type="button"
 						onclick={saveRevision}
-						disabled={!hasChanges || saving || starting}
+						disabled={!hasChanges || saving || starting || importing}
 					>
 						{saving ? 'Saving…' : 'Update quest'}
 					</button>
-					<button class="button button-primary" type="button" onclick={() => (step = 'settings')}>
-						Continue <span aria-hidden="true">→</span>
-					</button>
+					{#if !data.editMode}
+						<button class="button button-primary" type="button" onclick={() => (step = 'settings')}>
+							Continue <span aria-hidden="true">→</span>
+						</button>
+					{/if}
 				</div>
 			</section>
 		{:else}
@@ -585,6 +680,39 @@
 		margin-top: 1.2rem;
 		border-top: 1px solid var(--line);
 	}
+	.import-panel {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin: 1.1rem 0;
+		padding: 1rem;
+		border: 1px solid #e6decd;
+		border-radius: 0.8rem;
+		background: #fcfaf5;
+	}
+	.import-panel strong {
+		display: block;
+		color: var(--navy);
+		font-size: 0.82rem;
+	}
+	.import-panel p {
+		margin: 0.25rem 0;
+		color: var(--ink-muted);
+		font-size: 0.74rem;
+		line-height: 1.5;
+	}
+	.import-panel a {
+		display: inline-block;
+		margin-right: 0.8rem;
+		color: var(--navy);
+		font-size: 0.72rem;
+		font-weight: 700;
+	}
+	.import-button {
+		flex: 0 0 auto;
+		cursor: pointer;
+	}
 	.bulk-timing {
 		display: flex;
 		align-items: center;
@@ -627,6 +755,17 @@
 	.question-list {
 		display: grid;
 		gap: 1rem;
+	}
+	.empty-questions {
+		padding: 1.2rem;
+		border: 1px dashed var(--line);
+		border-radius: 0.8rem;
+		color: var(--navy);
+	}
+	.empty-questions p {
+		margin: 0.3rem 0 0;
+		color: var(--ink-muted);
+		font-size: 0.8rem;
 	}
 	.add-question {
 		width: 100%;
@@ -729,6 +868,10 @@
 		}
 		.bulk-timing {
 			align-items: stretch;
+			flex-direction: column;
+		}
+		.import-panel {
+			align-items: flex-start;
 			flex-direction: column;
 		}
 		.mode-card {

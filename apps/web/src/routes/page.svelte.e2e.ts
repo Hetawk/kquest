@@ -176,7 +176,7 @@ test('opens an owner quest workspace with question answers and overview tabs', a
 	await expect(page.getByRole('heading', { name: 'A published quest' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Edit quest', exact: true })).toHaveAttribute(
 		'href',
-		'/host/activities/quest-id'
+		'/host/activities/quest-id?edit=true'
 	);
 	await expect(page.getByText('First correct answer')).toBeVisible();
 	await expect(page.getByText('Multiple select')).toBeVisible();
@@ -189,6 +189,98 @@ test('opens an owner quest workspace with question answers and overview tabs', a
 		'Copy of A published quest'
 	);
 	await expect(page.locator('.prompt-input')).toHaveValue('Select both correct answers.');
+});
+
+test('opens published quest editing without play-mode setup and supports deleting and importing questions', async ({
+	page
+}) => {
+	await page.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			json: {
+				data: { id: 'educator-id', email: 'educator@example.test', name: 'Educator' }
+			}
+		})
+	);
+	await page.route('**/api/v1/auth/csrf', (route) =>
+		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
+	);
+	await page.route('**/api/v1/activities/quest-id', (route) =>
+		route.fulfill({
+			json: {
+				data: {
+					id: 'quest-id',
+					title: 'A published quest',
+					description: '',
+					status: 'published',
+					question_count: 1,
+					share_code: 'ABC123',
+					version: 1,
+					total_plays: 0,
+					updated_at: '2026-10-16T12:00:00Z',
+					published_at: '2026-10-16T12:00:00Z',
+					shuffle_questions: false,
+					speed_scoring: true,
+					questions: [
+						{
+							id: '10101010-1010-4101-8101-101010101001',
+							position: 1,
+							question_type: 'single_choice',
+							prompt: 'Original question',
+							options: [
+								{ id: '10101010-1010-4101-8101-101010101101', text: 'Original answer' },
+								{ id: '10101010-1010-4101-8101-101010101102', text: 'Another answer' }
+							],
+							correct_option_id: '10101010-1010-4101-8101-101010101101',
+							correct_option_ids: ['10101010-1010-4101-8101-101010101101'],
+							points: 100,
+							time_limit_seconds: 30
+						}
+					]
+				}
+			}
+		})
+	);
+	await page.route('**/api/v1/activities/quest-id/revisions', async (route) => {
+		const payload = route.request().postDataJSON() as {
+			revision: { expected_version: number; questions: Array<{ prompt: string }> };
+		};
+		expect(payload.revision.expected_version).toBe(1);
+		expect(payload.revision.questions).toHaveLength(1);
+		expect(payload.revision.questions[0]?.prompt).toBe('Imported question');
+		await route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					activity_id: 'quest-id',
+					title: 'A published quest',
+					version: 2,
+					share_code: 'NEW123',
+					play_path: '/play/NEW123'
+				}
+			}
+		});
+	});
+
+	await page.goto('/host/activities/quest-id?edit=true');
+	await expect(page.getByRole('heading', { name: 'Edit your questions' })).toBeVisible();
+	await expect(page.getByText('Participant-paced', { exact: true })).toHaveCount(0);
+	await expect(page.getByText('Instructor-paced live', { exact: true })).toHaveCount(0);
+	await expect(page.getByRole('link', { name: 'Download the CSV template' })).toBeVisible();
+	await expect(
+		page.getByRole('link', { name: 'Download NIA example questions (40)' })
+	).toBeVisible();
+	await page.getByRole('button', { name: 'Delete question 1' }).click();
+	await expect(page.getByText('No questions yet')).toBeVisible();
+	await page.locator('#revision-question-import').setInputFiles({
+		name: 'questions.csv',
+		mimeType: 'text/csv',
+		buffer: Buffer.from(
+			'question,option_a,option_b,correct_answer,points,time_limit_seconds\n"Imported question","First answer","Second answer","A",100,30'
+		)
+	});
+	await expect(page.locator('.prompt-input')).toHaveValue('Imported question');
+	await page.getByRole('button', { name: 'Update quest' }).click();
+	await expect(page).toHaveURL(/\/dashboard\/quests\/quest-id$/);
 });
 
 test('shows the created quest ID separately from its learner game code', async ({ page }) => {

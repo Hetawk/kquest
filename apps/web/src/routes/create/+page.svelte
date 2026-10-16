@@ -503,7 +503,7 @@
 								onMoveDown={() => moveQuestion(selectedQuestionIndex, 1)}
 								canMoveUp={selectedQuestionIndex > 0}
 								canMoveDown={selectedQuestionIndex < questions.length - 1}
-								canRemove={questions.length > 1}
+								canRemove={true}
 							/>
 						</section>
 					{/if}

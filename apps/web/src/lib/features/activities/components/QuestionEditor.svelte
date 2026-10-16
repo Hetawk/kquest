@@ -75,10 +75,11 @@
 		<button
 			class="icon-button remove-button"
 			type="button"
+			aria-label="Delete question {index + 1}"
 			disabled={!canRemove}
 			onclick={onRemove}
 		>
-			Remove
+			Delete
 		</button>
 	</legend>
 

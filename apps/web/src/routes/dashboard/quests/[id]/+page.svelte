@@ -143,12 +143,14 @@
 					>
 						Preview
 					</a>
+					<!-- eslint-disable svelte/no-navigation-without-resolve -->
 					<a
 						class="button button-outline"
-						href={resolve('/host/activities/[id]', { id: activity.id })}
+						href={resolve('/host/activities/[id]', { id: activity.id }) + '?edit=true'}
 					>
 						Edit quest
 					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 					<button
 						class="button button-outline"
 						type="button"
@@ -219,9 +221,14 @@
 						<p class="eyebrow">Question library</p>
 						<h2>Inside this quest</h2>
 					</div>
-					<a class="text-link" href={resolve('/host/activities/[id]', { id: activity.id })}>
+					<!-- eslint-disable svelte/no-navigation-without-resolve -->
+					<a
+						class="text-link"
+						href={resolve('/host/activities/[id]', { id: activity.id }) + '?edit=true'}
+					>
 						Review and edit questions before starting <span aria-hidden="true">↗</span>
 					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				</div>
 				{#if activity.questions.length}
 					<div class="question-library">

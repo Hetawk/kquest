@@ -816,6 +816,12 @@ the host can review, reorder, add, remove, and edit questions, answer choices,
 correct answers, points, and timing. The host can set one time limit for all
 questions or adjust each question individually. Starting with unsaved changes
 must save a new version before creating the room or opening the learner link.
+Editing a quest is a separate workflow from starting a session: it must open
+directly on quest content and must not ask for a play pace. Play pace is chosen
+only from the session-start workflow. The editor supports importing CSV and
+XLSX question files, provides a downloadable template and sample, and allows
+deleting any question; the creator must add at least one valid question before
+saving a revision.
 There is no subscription-plan ceiling on the number of quests or participants.
 Apply technical safeguards for request size and service capacity separately
 from product quotas.
