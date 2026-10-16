@@ -1,0 +1,348 @@
+openapi: 3.1.0
+info:
+  title: KINGDOM Quest API
+  version: 1.0.0
+  description: >-
+    Versioned REST API for KINGDOM Quest. The learning-journey prototype
+    endpoints are enabled only in development and test until authentication,
+    authorization, and abuse protections are implemented.
+servers:
+  - url: /api/v1
+paths:
+  /health:
+    get:
+      operationId: getApiHealth
+      summary: Check API process health
+      responses:
+        "200":
+          description: The API process is available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                data:
+                  status: ok
+                  api_version: v1
+  /activities:
+    post:
+      operationId: createActivity
+      summary: Create a draft activity
+      description: Development/test prototype endpoint; unavailable in production.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activity]
+              properties:
+                  activity:
+                    type: object
+                    required: [title, description, questions]
+                    properties:
+                      title:
+                        type: string
+                      description:
+                        type: string
+                      questions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/QuestionDraft"
+      responses:
+        "201":
+          description: Draft created.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      type: object
+                      required: [id, title, description, question_count, status]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        description:
+                          type: string
+                        question_count:
+                          type: integer
+                        status:
+                          type: string
+                          const: draft
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /activities/{activity_id}/publications:
+    parameters:
+      - name: activity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: publishActivity
+      summary: Publish an immutable activity version
+      description: Development/test prototype endpoint; unavailable in production.
+      responses:
+        "201":
+          description: Published version and learner share code.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      type: object
+                      required: [title, version, share_code, play_path]
+                      properties:
+                        title:
+                          type: string
+                        version:
+                          type: integer
+                        share_code:
+                          type: string
+                        play_path:
+                          type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /play/{share_code}:
+    parameters:
+      - $ref: "#/components/parameters/ShareCode"
+    get:
+      operationId: getPublishedActivity
+      summary: Get learner-safe activity content
+      description: Correct answer identifiers are not included in this response.
+      responses:
+        "200":
+          description: Published activity content.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      $ref: "#/components/schemas/PlayActivity"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /play/{share_code}/attempts:
+    parameters:
+      - $ref: "#/components/parameters/ShareCode"
+    post:
+      operationId: submitAttempt
+      summary: Submit answers and receive a server-graded result
+      description: Development/test prototype endpoint; unavailable in production.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attempt]
+              properties:
+                  attempt:
+                    type: object
+                    required: [learner_name, responses]
+                    properties:
+                      learner_name:
+                        type: string
+                        minLength: 1
+                        maxLength: 80
+                      responses:
+                        type: array
+                        items:
+                          type: object
+                          required: [question_id, option_id]
+                          properties:
+                            question_id:
+                              type: string
+                              format: uuid
+                            option_id:
+                              type: string
+                              format: uuid
+      responses:
+        "201":
+          description: Attempt accepted and graded.
+          content:
+            application/json:
+              schema:
+                  type: object
+                  required: [data]
+                  properties:
+                    data:
+                      $ref: "#/components/schemas/AttemptResult"
+        "200":
+          description: Previously accepted attempt returned for an idempotent retry.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Idempotency key was reused with different answers.
+        "422":
+          $ref: "#/components/responses/ValidationError"
+components:
+  parameters:
+    ShareCode:
+      name: share_code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-HJ-NP-Z2-9]{12}$"
+  responses:
+    NotFound:
+      description: Resource not found or unavailable in this environment.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationError:
+      description: Submitted data is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: object
+          required:
+            - status
+            - api_version
+          properties:
+            status:
+              type: string
+              const: ok
+            api_version:
+              type: string
+              const: v1
+    QuestionDraft:
+      type: object
+      required: [prompt, options, correct_option_id, points]
+      properties:
+        prompt:
+          type: string
+          maxLength: 500
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            $ref: "#/components/schemas/ChoiceOption"
+        correct_option_id:
+          type: string
+          format: uuid
+        points:
+          type: integer
+          minimum: 1
+          maximum: 1000
+    ChoiceOption:
+      type: object
+      required: [id, text]
+      properties:
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+          maxLength: 160
+    PlayActivity:
+      type: object
+      required: [id, title, share_code, questions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        share_code:
+          type: string
+        questions:
+          type: array
+          items:
+            type: object
+            required: [id, prompt, points, options]
+            properties:
+              id:
+                type: string
+                format: uuid
+              prompt:
+                type: string
+              points:
+                type: integer
+              options:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChoiceOption"
+    AttemptResult:
+      type: object
+      required: [id, learner_name, score, max_score, results]
+      properties:
+        id:
+          type: string
+          format: uuid
+        learner_name:
+          type: string
+        score:
+          type: integer
+        max_score:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            required:
+              - question_id
+              - prompt
+              - selected_option_id
+              - correct_option_id
+              - points_awarded
+              - points_possible
+            properties:
+              question_id:
+                type: string
+                format: uuid
+              prompt:
+                type: string
+              selected_option_id:
+                type: string
+                format: uuid
+              correct_option_id:
+                type: string
+                format: uuid
+              points_awarded:
+                type: integer
+              points_possible:
+                type: integer
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object

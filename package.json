@@ -1,0 +1,13 @@
+{
+  "name": "kingdom-quest",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "check:web": "npm --prefix apps/web run check",
+    "lint:web": "npm --prefix apps/web run lint",
+    "test:web": "npm --prefix apps/web run test:unit -- --run",
+    "test:e2e:web": "npm --prefix apps/web run test:e2e"
+  }
+}

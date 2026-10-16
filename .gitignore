@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+apps/web/.svelte-kit/
+apps/web/build/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/coverage/
+
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
