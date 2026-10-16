@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import questionTemplateUrl from '#lib/assets/question-import-template.csv?url';
+	import niaQuestionsUrl from '../../../docs/questions.csv?url';
 	import QuestionEditor from '#lib/features/activities/components/QuestionEditor.svelte';
 	import { importQuestionFile } from '#lib/features/activities/importQuestions.js';
 	import {
@@ -43,6 +44,7 @@
 	let published = $state<PublishedActivity | null>(null);
 	let copied = $state(false);
 	let copiedLink = $state(false);
+	let copiedActivityId = $state(false);
 	let authChecking = $state(true);
 	let signedIn = $state(false);
 	let coverImage = $state<{ id: string; public_url: string } | null>(null);
@@ -245,11 +247,24 @@
 	async function copyJoinLink() {
 		if (!published) return;
 		try {
-			await navigator.clipboard.writeText(`${window.location.origin}/join/${published.share_code}`);
+			const url = new URL(resolve('/join'), window.location.origin);
+			url.searchParams.set('code', published.share_code);
+			await navigator.clipboard.writeText(url.toString());
 			copiedLink = true;
 			window.setTimeout(() => (copiedLink = false), 1800);
 		} catch {
 			error = 'Copying is unavailable here. Share the game code instead.';
+		}
+	}
+
+	async function copyActivityId() {
+		if (!published) return;
+		try {
+			await navigator.clipboard.writeText(published.activity_id);
+			copiedActivityId = true;
+			window.setTimeout(() => (copiedActivityId = false), 1800);
+		} catch {
+			error = 'Copying is unavailable here. Select the quest ID to copy it.';
 		}
 	}
 </script>
@@ -294,6 +309,15 @@
 				server.
 			</p>
 			<div class="share-code" aria-label="Game code">{published.share_code}</div>
+			<div class="activity-id-panel">
+				<div>
+					<span>QUEST ID</span>
+					<code>{published.activity_id}</code>
+				</div>
+				<button class="button button-outline" type="button" onclick={copyActivityId}>
+					{copiedActivityId ? 'Copied!' : 'Copy quest ID'}
+				</button>
+			</div>
 			<div class="published-actions">
 				<button class="button button-primary" type="button" onclick={copyCode}>
 					{copied ? 'Copied!' : 'Copy game code'}
@@ -416,6 +440,8 @@
 						</p>
 						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 						<a href={questionTemplateUrl} download>Download the CSV template</a>
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a href={niaQuestionsUrl} download>Download NIA 2026 questions (40)</a>
 					</div>
 					<label class="button button-outline import-button" for="question-import">
 						{importing ? 'Reading file…' : 'Import CSV / XLSX'}
@@ -965,6 +991,45 @@
 		letter-spacing: 0.2em;
 	}
 
+	.activity-id-panel {
+		display: flex;
+		width: min(100%, 30rem);
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-top: 0.8rem;
+		padding: 0.75rem 0.9rem;
+		border: 1px solid var(--line);
+		border-radius: 0.85rem;
+		background: #fdfbf7;
+		text-align: left;
+	}
+
+	.activity-id-panel > div {
+		display: grid;
+		gap: 0.3rem;
+		min-width: 0;
+	}
+
+	.activity-id-panel span {
+		color: var(--ink-muted);
+		font-size: 0.64rem;
+		font-weight: 800;
+		letter-spacing: 0.12em;
+	}
+
+	.activity-id-panel code {
+		overflow-wrap: anywhere;
+		color: var(--ink-soft);
+		font-size: 0.76rem;
+	}
+
+	.activity-id-panel .button {
+		flex: 0 0 auto;
+		padding: 0.55rem 0.75rem;
+		font-size: 0.75rem;
+	}
+
 	.published-actions {
 		display: flex;
 		flex-wrap: wrap;
@@ -989,6 +1054,11 @@
 	}
 
 	@media (max-width: 600px) {
+		.activity-id-panel {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
 		.import-panel {
 			align-items: flex-start;
 			flex-direction: column;

@@ -175,7 +175,7 @@
 				type="number"
 				min="1"
 				max="1000"
-				step="25"
+				step="1"
 				value={question.points}
 				onchange={(event) =>
 					onUpdate({ ...question, points: Number.parseInt(event.currentTarget.value, 10) || 0 })}

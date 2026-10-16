@@ -187,6 +187,97 @@ test('opens an owner quest workspace with question answers and overview tabs', a
 	await expect(page.locator('.prompt-input')).toHaveValue('Select both correct answers.');
 });
 
+test('shows the created quest ID separately from its learner game code', async ({ page }) => {
+	const questId = '0199d6a6-3eb2-7b6e-9d74-d4cb14be9812';
+	await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+	await page.route('**/api/v1/auth/csrf', (route) =>
+		route.fulfill({ json: { data: { token: 'test-csrf-token' } } })
+	);
+	await page.route('**/api/v1/me', (route) =>
+		route.fulfill({
+			json: {
+				data: { id: 'educator-id', email: 'educator@example.test', name: 'Educator' }
+			}
+		})
+	);
+	await page.route('**/api/v1/activities', async (route) => {
+		expect(route.request().method()).toBe('POST');
+		const payload = route.request().postDataJSON() as {
+			activity: {
+				title: string;
+				questions: Array<{
+					prompt: string;
+					options: Array<{ id: string; text: string }>;
+					correct_option_id: string;
+				}>;
+			};
+		};
+		expect(payload.activity.title).toBe('NIA 2026 Bible Trivia Review');
+		expect(payload.activity.questions[0]?.prompt).toBe('When did NIA 2026 take place?');
+		expect(payload.activity.questions[0]?.correct_option_id).toBe(
+			payload.activity.questions[0]?.options[1]?.id
+		);
+		await route.fulfill({
+			status: 201,
+			json: { data: { id: questId, title: 'NIA 2026 Bible Trivia Review' } }
+		});
+	});
+	await page.route(`**/api/v1/activities/${questId}/publications`, (route) =>
+		route.fulfill({
+			status: 201,
+			json: {
+				data: {
+					activity_id: questId,
+					title: 'NIA 2026 Bible Trivia Review',
+					version: 1,
+					share_code: 'VQFAXD',
+					play_path: '/play/VQFAXD'
+				}
+			}
+		})
+	);
+
+	await page.goto('/create');
+	const downloadPromise = page.waitForEvent('download');
+	await page.getByRole('link', { name: 'Download NIA 2026 questions (40)' }).click();
+	expect((await downloadPromise).suggestedFilename()).toBe('questions.csv');
+	await page
+		.getByPlaceholder('e.g. The Great Solar System Sprint')
+		.fill('NIA 2026 Bible Trivia Review');
+	await page.locator('.prompt-input').fill('When did NIA 2026 take place?');
+	await page.getByLabel('Answer choice 1').fill('Friday 3rd and Saturday 4th October');
+	await page.getByLabel('Answer choice 2').fill('Tuesday 6th and Wednesday 7th October 2026');
+	await page.getByLabel('Answer choice 3').fill('Monday 5th October only');
+	await page.getByLabel('Answer choice 4').fill('Saturday 10th and Sunday 11th October');
+	await page.getByLabel('Mark option 2 as correct').check();
+	const invalidFields = await page.locator('form').evaluate((form: HTMLFormElement) =>
+		Array.from(form.querySelectorAll<HTMLElement>(':invalid')).map((field) => ({
+			label: field.getAttribute('aria-label') ?? field.id ?? field.getAttribute('placeholder'),
+			type: (field as HTMLInputElement).type,
+			value: (field as HTMLInputElement).value,
+			message: (field as HTMLInputElement).validationMessage
+		}))
+	);
+	expect(invalidFields).toEqual([]);
+	const createRequest = page.waitForRequest(
+		(request) => request.url().endsWith('/api/v1/activities') && request.method() === 'POST'
+	);
+	await page.getByRole('button', { name: 'Publish quest' }).click();
+	await createRequest;
+
+	await expect(page.getByRole('heading', { name: 'NIA 2026 Bible Trivia Review' })).toBeVisible();
+	await expect(page.getByLabel('Game code')).toHaveText('VQFAXD');
+	await expect(page.getByText(questId)).toBeVisible();
+	await page.getByRole('button', { name: 'Copy direct join link' }).click();
+	await expect(page.getByRole('button', { name: 'Join link copied!' })).toBeVisible();
+	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe(
+		'http://127.0.0.1:5173/join?code=VQFAXD'
+	);
+	await page.getByRole('button', { name: 'Copy quest ID' }).click();
+	await expect(page.getByRole('button', { name: 'Copied!' })).toBeVisible();
+	await expect(page.evaluate(() => navigator.clipboard.readText())).resolves.toBe(questId);
+});
+
 test('opens session setup and creates a live lobby with a join QR code and participant roster', async ({
 	page
 }) => {

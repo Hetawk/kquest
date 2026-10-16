@@ -102,6 +102,7 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     publication = publish_activity(activity_id)
 
     assert_match(/\A[A-HJ-NP-Z2-9]{6}\z/, publication.fetch("share_code"))
+    assert_equal activity_id, publication.fetch("activity_id")
     assert_equal 1, publication.fetch("version")
     get "/api/v1/play/#{publication.fetch("share_code")}"
 
