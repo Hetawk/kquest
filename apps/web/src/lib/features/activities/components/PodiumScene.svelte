@@ -149,6 +149,7 @@
 			waveArm: import('three').Group;
 			tail: import('three').Group | null;
 			baseY: number;
+			scale: number;
 			index: number;
 		}> = [];
 		const confetti: import('three').Mesh[] = [];
@@ -161,12 +162,12 @@
 			if (!renderer || !scene || !camera || disposed) return;
 			const elapsed = (performance.now() - startedAt) / 1000;
 			if (!reduceMotion.matches && visible) {
-				figures.forEach(({ group, head, waveArm, tail, baseY, index }) => {
+				figures.forEach(({ group, head, waveArm, tail, baseY, scale, index }) => {
 					const delay = [0.22, 0, 0.4][index] ?? index * 0.2;
 					const progress = Math.min(1, Math.max(0, (elapsed - delay) / 0.72));
 					const eased = 1 - (1 - progress) ** 3;
 					group.position.y = baseY - 0.32 * (1 - eased) + Math.sin(elapsed * 2 + index) * 0.025;
-					group.scale.setScalar(eased);
+					group.scale.setScalar(scale * eased);
 					group.rotation.y = Math.sin(elapsed * 0.62 + index) * 0.22;
 					head.rotation.y = Math.sin(elapsed * 0.8 + index * 1.4) * 0.15;
 					waveArm.rotation.z = -0.85 + Math.sin(elapsed * 2.4 + index) * 0.13;
@@ -184,9 +185,9 @@
 				});
 				frame = requestAnimationFrame(render);
 			} else {
-				figures.forEach(({ group, head, waveArm, tail, baseY }) => {
+				figures.forEach(({ group, head, waveArm, tail, baseY, scale }) => {
 					group.position.y = baseY;
-					group.scale.setScalar(1);
+					group.scale.setScalar(scale);
 					group.rotation.y = 0;
 					head.rotation.y = 0;
 					waveArm.rotation.z = -0.85;
@@ -211,7 +212,7 @@
 					renderer.outputColorSpace = THREE.SRGBColorSpace;
 					renderer.setClearColor(0x000000, 0);
 					scene = new THREE.Scene();
-					camera = new THREE.OrthographicCamera(-2, 2, 2, -2, 0.1, 50);
+					camera = new THREE.OrthographicCamera(-2, 2, 2.4, -2.4, 0.1, 50);
 					camera.position.set(0, 0, 10);
 					camera.lookAt(0, 0, 0);
 
@@ -281,9 +282,11 @@
 					const createMascot = (characterId: string, index: number) => {
 						const look = characterLooks[characterId] ?? characterLooks.fox;
 						const group = new THREE.Group();
-						const baseY = index === 1 ? 0.42 : 0.02;
+						const baseY = index === 1 ? 1.45 : 0.42;
+						const scale = index === 1 ? 0.58 : 0.86;
 						const x = [-1, 0, 1][index] ?? 0;
 						group.position.set(x, baseY, 0);
+						group.scale.setScalar(scale);
 						scene!.add(group);
 
 						const torso = new THREE.Group();
@@ -452,7 +455,7 @@
 							}
 						}
 
-						return { group, head, waveArm, tail, baseY, index };
+						return { group, head, waveArm, tail, baseY, scale, index };
 					};
 
 					for (const [index, characterId] of characterIds.entries()) {
@@ -485,6 +488,8 @@
 						const { width, height } = canvas.parentElement.getBoundingClientRect();
 						if (!width || !height) return;
 						const aspect = width / height;
+						camera.top = 2.4;
+						camera.bottom = -2.4;
 						camera.left = -aspect * 2;
 						camera.right = aspect * 2;
 						camera.updateProjectionMatrix();

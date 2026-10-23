@@ -153,7 +153,6 @@
 
 	.podium-places {
 		position: relative;
-		position: relative;
 		display: grid;
 		height: 15.3rem;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
