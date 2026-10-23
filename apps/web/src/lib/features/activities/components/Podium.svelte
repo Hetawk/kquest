@@ -144,7 +144,7 @@
 		min-height: 18rem;
 		overflow: hidden;
 		margin-top: 1.15rem;
-		padding: 1.25rem 0.75rem 0;
+		padding: 4rem 0.75rem 0;
 		border-radius: 1rem;
 		background:
 			radial-gradient(ellipse at 50% 95%, rgb(204 175 119 / 23%), transparent 54%),

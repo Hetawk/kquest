@@ -148,10 +148,18 @@
 			head: import('three').Group;
 			waveArm: import('three').Group;
 			tail: import('three').Group | null;
+			baseX: number;
 			baseY: number;
 			scale: number;
 			index: number;
 		}> = [];
+		const podiumSelectors = [
+			'.winner.place-second .podium-block',
+			'.winner.place-first .podium-block',
+			'.winner.place-third .podium-block'
+		];
+		const mascotScale = 0.9;
+		const pixelsPerWorldUnit = 64;
 		const confetti: import('three').Mesh[] = [];
 		const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 		let visible = true;
@@ -162,10 +170,11 @@
 			if (!renderer || !scene || !camera || disposed) return;
 			const elapsed = (performance.now() - startedAt) / 1000;
 			if (!reduceMotion.matches && visible) {
-				figures.forEach(({ group, head, waveArm, tail, baseY, scale, index }) => {
+				figures.forEach(({ group, head, waveArm, tail, baseX, baseY, scale, index }) => {
 					const delay = [0.22, 0, 0.4][index] ?? index * 0.2;
 					const progress = Math.min(1, Math.max(0, (elapsed - delay) / 0.72));
 					const eased = 1 - (1 - progress) ** 3;
+					group.position.x = baseX;
 					group.position.y = baseY - 0.32 * (1 - eased) + Math.sin(elapsed * 2 + index) * 0.025;
 					group.scale.setScalar(scale * eased);
 					group.rotation.y = Math.sin(elapsed * 0.62 + index) * 0.22;
@@ -185,7 +194,8 @@
 				});
 				frame = requestAnimationFrame(render);
 			} else {
-				figures.forEach(({ group, head, waveArm, tail, baseY, scale }) => {
+				figures.forEach(({ group, head, waveArm, tail, baseX, baseY, scale }) => {
+					group.position.x = baseX;
 					group.position.y = baseY;
 					group.scale.setScalar(scale);
 					group.rotation.y = 0;
@@ -282,11 +292,9 @@
 					const createMascot = (characterId: string, index: number) => {
 						const look = characterLooks[characterId] ?? characterLooks.fox;
 						const group = new THREE.Group();
-						const baseY = index === 1 ? 1.45 : 0.42;
-						const scale = index === 1 ? 0.58 : 0.86;
-						const x = [-1, 0, 1][index] ?? 0;
-						group.position.set(x, baseY, 0);
-						group.scale.setScalar(scale);
+						const baseY = 0;
+						const scale = mascotScale;
+						group.scale.setScalar(mascotScale);
 						scene!.add(group);
 
 						const torso = new THREE.Group();
@@ -455,7 +463,7 @@
 							}
 						}
 
-						return { group, head, waveArm, tail, baseY, scale, index };
+						return { group, head, waveArm, tail, baseX: 0, baseY, scale, index };
 					};
 
 					for (const [index, characterId] of characterIds.entries()) {
@@ -485,17 +493,29 @@
 
 					const resize = () => {
 						if (!renderer || !camera || !canvas.parentElement) return;
-						const { width, height } = canvas.parentElement.getBoundingClientRect();
+						const sceneElement = canvas.parentElement;
+						const { width, height } = sceneElement.getBoundingClientRect();
 						if (!width || !height) return;
-						const aspect = width / height;
-						camera.top = 2.4;
-						camera.bottom = -2.4;
-						camera.left = -aspect * 2;
-						camera.right = aspect * 2;
+						const halfViewHeight = height / pixelsPerWorldUnit / 2;
+						const halfViewWidth = width / pixelsPerWorldUnit / 2;
+						camera.top = halfViewHeight;
+						camera.bottom = -halfViewHeight;
+						camera.left = -halfViewWidth;
+						camera.right = halfViewWidth;
 						camera.updateProjectionMatrix();
-						const sideX = (aspect * 4) / 3;
-						figures.forEach(({ group, index }) => {
-							group.position.x = [-sideX, 0, sideX][index] ?? 0;
+						const sceneRect = sceneElement.getBoundingClientRect();
+						const podiumContainer = sceneElement.parentElement;
+						figures.forEach((figure) => {
+							const { group, index } = figure;
+							const selector = podiumSelectors[index];
+							const podiumFace = selector ? podiumContainer?.querySelector(selector) : null;
+							if (!(podiumFace instanceof HTMLElement)) return;
+							const faceRect = podiumFace.getBoundingClientRect();
+							const centerX = faceRect.left + faceRect.width / 2 - sceneRect.left;
+							const faceTop = faceRect.top - sceneRect.top;
+							figure.baseX = (centerX - width / 2) / pixelsPerWorldUnit;
+							figure.baseY = halfViewHeight - faceTop / pixelsPerWorldUnit;
+							group.position.set(figure.baseX, figure.baseY, 0);
 						});
 						renderer.setSize(width, height, false);
 						cancelAnimationFrame(frame);
@@ -560,7 +580,7 @@
 	.podium-scene {
 		position: absolute;
 		z-index: 0;
-		inset: 0;
+		inset: -3rem 0 0;
 		pointer-events: none;
 	}
 
