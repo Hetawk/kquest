@@ -232,7 +232,6 @@
 								roughness: 0.62,
 								metalness: 0.02
 							});
-							materials.set(color, current);
 						}
 						return current;
 					};
