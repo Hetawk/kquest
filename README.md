@@ -119,11 +119,12 @@ are recorded as unanswered and score zero. The learner countdown and answer
 requests are retry-safe.
 
 The player starts its original, soft ambient audio only after the learner
-starts the quest. A sound control remains available during play; gentle ticks
-are limited to the last five seconds, and answer cues follow server feedback.
-Sound is optional, audio failures do not block play, and audio stops when the
-quest ends. Howler.js is loaded only in the browser through Svelte's mount
-lifecycle. The generated assets can be recreated with
+starts the quest. Sound controls remain available during play and include a
+master volume slider; gentle ticks are limited to the last five seconds, and
+answer cues follow server feedback. Completion and results-podium cues use
+original generated audio. Sound is optional, audio failures do not block play,
+and ambient audio stops when the quest ends. Howler.js is loaded only in the
+browser through Svelte's mount lifecycle. The generated assets can be recreated with
 `python3 apps/web/scripts/generate-audio-assets.py`.
 
 Creator APIs require a verified signed-in account and scope activity access to
@@ -132,8 +133,14 @@ can join without accounts. Organization roles, class-level administration,
 and additional anti-abuse controls are not implemented; do not treat a game
 code as private content.
 
-The decorative Three.js scene is not required for gameplay and respects reduced
-motion preferences. The API contract is in [`docs/api/openapi.yaml`](./docs/api/openapi.yaml).
+The Three.js scenes, including the results podium, are decorative and use
+locally generated geometry,
+so no third-party character-model license is required. It is not required for
+gameplay, respects reduced-motion preferences, and falls back to readable
+rankings when WebGL is unavailable. Rails remains the source of truth for all
+scores and rankings. The complete product requirements are in
+[`kingdom_quest.md`](./kingdom_quest.md); the API contract is in
+[`docs/api/openapi.yaml`](./docs/api/openapi.yaml).
 
 ## Checks
 

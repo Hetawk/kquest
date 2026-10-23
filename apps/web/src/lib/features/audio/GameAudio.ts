@@ -5,10 +5,15 @@ export class GameAudio {
 	private readonly tick: Howl;
 	private readonly correct: Howl;
 	private readonly incorrect: Howl;
+	private readonly completion: Howl;
+	private readonly podium: Howl;
 	private enabled = true;
 	private started = false;
+	private unlocked = false;
 	private timerUrgency = 0;
+	private masterVolume = 1;
 	private ambientStopTimer: ReturnType<typeof setTimeout> | undefined;
+	private podiumTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(
 		onLoadError: () => void,
@@ -46,11 +51,24 @@ export class GameAudio {
 			preload: true,
 			onloaderror: handleLoadError
 		});
+		this.completion = new Howl({
+			src: ['/audio/completion-chime.wav'],
+			volume: 0.24,
+			preload: true,
+			onloaderror: handleLoadError
+		});
+		this.podium = new Howl({
+			src: ['/audio/podium-reveal.wav'],
+			volume: 0.28,
+			preload: true,
+			onloaderror: handleLoadError
+		});
 	}
 
 	start() {
 		const wasStarted = this.started;
 		this.started = true;
+		this.unlocked = true;
 		if (!this.enabled) return;
 
 		this.clearAmbientStop();
@@ -68,7 +86,8 @@ export class GameAudio {
 	setEnabled(enabled: boolean) {
 		this.enabled = enabled;
 		this.clearAmbientStop();
-		for (const sound of [this.ambient, this.tick, this.correct, this.incorrect]) {
+		if (!enabled) this.clearPodiumTimer();
+		for (const sound of this.sounds()) {
 			sound.mute(!enabled);
 		}
 
@@ -76,9 +95,19 @@ export class GameAudio {
 		if (!enabled) this.ambient.pause();
 	}
 
+	setVolume(volume: number) {
+		this.masterVolume = Math.max(0, Math.min(volume, 1));
+		this.ambient.volume(0.12 * this.masterVolume);
+		this.tick.volume((0.08 + this.timerUrgency * 0.22) * this.masterVolume);
+		this.correct.volume(0.2 * this.masterVolume);
+		this.incorrect.volume(0.16 * this.masterVolume);
+		this.completion.volume(0.24 * this.masterVolume);
+		this.podium.volume(0.28 * this.masterVolume);
+	}
+
 	playTick(urgency = 0) {
 		if (!this.enabled || !this.started) return;
-		this.tick.volume(0.08 + Math.max(0, Math.min(urgency, 1)) * 0.22);
+		this.tick.volume((0.08 + Math.max(0, Math.min(urgency, 1)) * 0.22) * this.masterVolume);
 		this.tick.play();
 	}
 
@@ -92,6 +121,20 @@ export class GameAudio {
 	playAnswerCue(isCorrect: boolean) {
 		if (!this.enabled || !this.started) return;
 		(isCorrect ? this.correct : this.incorrect).play();
+	}
+
+	playCompletionCue() {
+		if (!this.enabled || !this.unlocked) return;
+		this.completion.play();
+	}
+
+	playPodiumReveal() {
+		if (!this.enabled || !this.unlocked) return;
+		this.clearPodiumTimer();
+		this.podiumTimer = setTimeout(() => {
+			this.podiumTimer = undefined;
+			if (this.enabled && this.unlocked) this.podium.play();
+		}, 600);
 	}
 
 	stopAmbient() {
@@ -108,10 +151,15 @@ export class GameAudio {
 
 	dispose() {
 		this.clearAmbientStop();
-		for (const sound of [this.ambient, this.tick, this.correct, this.incorrect]) {
+		this.clearPodiumTimer();
+		for (const sound of this.sounds()) {
 			sound.stop();
 			sound.unload();
 		}
+	}
+
+	private sounds() {
+		return [this.ambient, this.tick, this.correct, this.incorrect, this.completion, this.podium];
 	}
 
 	private clearAmbientStop() {
@@ -120,7 +168,13 @@ export class GameAudio {
 		this.ambientStopTimer = undefined;
 	}
 
+	private clearPodiumTimer() {
+		if (!this.podiumTimer) return;
+		clearTimeout(this.podiumTimer);
+		this.podiumTimer = undefined;
+	}
+
 	private ambientTargetVolume() {
-		return 0.12 + this.timerUrgency * 0.08;
+		return (0.12 + this.timerUrgency * 0.08) * this.masterVolume;
 	}
 }

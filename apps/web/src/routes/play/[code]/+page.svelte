@@ -9,6 +9,7 @@
 		startPlaySession
 	} from '#lib/features/activities/api.js';
 	import Podium from '#lib/features/activities/components/Podium.svelte';
+	import SoundControl from '#lib/features/audio/SoundControl.svelte';
 	import type {
 		AttemptResult,
 		PlayLeaderboard,
@@ -32,7 +33,10 @@
 	let playSessionId = $state('');
 	let secondsRemaining = $state(0);
 	let soundEnabled = $state(true);
+	let audioVolume = $state(1);
 	let audioUnavailable = $state(false);
+	let soundNeedsGesture = $state(false);
+	let podiumRevealPlayed = false;
 	let feedbackMessage = $state('');
 	let editingName = $state(false);
 	let savingName = $state(false);
@@ -69,7 +73,7 @@
 			if (!attempt) return;
 			void fetchLeaderboard(data.shareCode)
 				.then((result) => {
-					if (!disposed) leaderboard = result;
+					if (!disposed) applyLeaderboard(result);
 				})
 				.catch((cause: unknown) => {
 					if (!disposed)
@@ -83,10 +87,15 @@
 		void import('#lib/features/audio/GameAudio.js')
 			.then(({ GameAudio }) => {
 				if (disposed) return;
-				gameAudio = new GameAudio(() => (audioUnavailable = true));
+				gameAudio = new GameAudio(
+					() => (audioUnavailable = true),
+					() => (soundNeedsGesture = true),
+					() => (soundNeedsGesture = false)
+				);
 				audioUnavailable = false;
+				gameAudio.setVolume(audioVolume);
 				if (!soundEnabled) gameAudio.setEnabled(false);
-				if (started) gameAudio.start();
+				if (started && !attempt) gameAudio.start();
 			})
 			.catch(() => {
 				audioUnavailable = true;
@@ -178,9 +187,10 @@
 
 			if (progress.complete) {
 				attempt = progress.attempt;
+				gameAudio?.playCompletionCue();
 				gameAudio?.stopAmbient();
 				void fetchLeaderboard(activity.share_code)
-					.then((result) => (leaderboard = result))
+					.then(applyLeaderboard)
 					.catch((cause: unknown) => {
 						error =
 							cause instanceof Error
@@ -243,8 +253,25 @@
 	}
 
 	function toggleSound() {
+		if (soundNeedsGesture) {
+			gameAudio?.start();
+			return;
+		}
 		soundEnabled = !soundEnabled;
 		gameAudio?.setEnabled(soundEnabled);
+	}
+
+	function changeVolume(volume: number) {
+		audioVolume = volume;
+		gameAudio?.setVolume(volume);
+	}
+
+	function applyLeaderboard(result: PlayLeaderboard) {
+		leaderboard = result;
+		if (!podiumRevealPlayed && result.podium.length > 0) {
+			podiumRevealPlayed = true;
+			gameAudio?.playPodiumReveal();
+		}
 	}
 
 	function formatDuration(seconds: number | null) {
@@ -293,6 +320,14 @@
 				Thanks for playing, {attempt.learner_name}. Every question is another chance to learn.
 			</p>
 			<p class="duration-summary">Time spent: {formatDuration(attempt.duration_seconds)}</p>
+			<SoundControl
+				enabled={soundEnabled}
+				volume={audioVolume}
+				unavailable={audioUnavailable}
+				needsGesture={soundNeedsGesture}
+				onToggle={toggleSound}
+				onVolumeChange={changeVolume}
+			/>
 			<div
 				class="score-display"
 				aria-label="Your score: {attempt.score} out of {attempt.max_score} points"
@@ -403,14 +438,14 @@
 				<a href={resolve('/join')} class="exit-link">← Leave game</a>
 				<div class="game-actions">
 					<span class="game-code">{activity.share_code}</span>
-					<button
-						class="sound-toggle"
-						type="button"
-						aria-pressed={soundEnabled}
-						onclick={toggleSound}
-					>
-						Sound {soundEnabled ? 'on' : 'off'}
-					</button>
+					<SoundControl
+						enabled={soundEnabled}
+						volume={audioVolume}
+						unavailable={audioUnavailable}
+						needsGesture={soundNeedsGesture}
+						onToggle={toggleSound}
+						onVolumeChange={changeVolume}
+					/>
 				</div>
 			</div>
 
@@ -767,22 +802,6 @@
 		display: flex;
 		align-items: center;
 		gap: 0.55rem;
-	}
-
-	.sound-toggle {
-		padding: 0.4rem 0.6rem;
-		border: 1px solid var(--line);
-		border-radius: 0.55rem;
-		background: white;
-		color: var(--ink-soft);
-		font: inherit;
-		font-size: 0.7rem;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.sound-toggle:hover {
-		border-color: var(--gold-deep);
 	}
 
 	.exit-link {

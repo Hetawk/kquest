@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import Podium from '#lib/features/activities/components/Podium.svelte';
+	import SoundControl from '#lib/features/audio/SoundControl.svelte';
 	import {
 		answerGameRoomQuestion,
 		fetchGameRoom,
@@ -30,6 +31,7 @@
 	let answeredLocally = $state(false);
 	let timeoutSent = $state(false);
 	let soundEnabled = $state(true);
+	let audioVolume = $state(1);
 	let soundNeedsGesture = $state(false);
 	let audioUnavailable = $state(false);
 	let waitingAudio: import('#lib/features/audio/WaitingRoomAudio.js').WaitingRoomAudio | null =
@@ -61,7 +63,12 @@
 				if (disposed) return;
 				const previousIndex = room?.question_index;
 				const previousPhase = room?.round_phase;
+				const previousStatus = room?.status;
 				room = updated;
+				if (previousStatus !== 'completed' && updated.status === 'completed') {
+					liveAudio?.playCompletionCue();
+					liveAudio?.playPodiumReveal();
+				}
 				if (
 					previousPhase === 'leaderboard' &&
 					updated.round_phase === 'answer' &&
@@ -106,6 +113,7 @@
 					() => (soundNeedsGesture = true),
 					() => (soundNeedsGesture = false)
 				);
+				waitingAudio.setVolume(audioVolume);
 				if (room?.status === 'waiting' && sessionId) waitingAudio.start();
 			})
 			.catch(() => {
@@ -119,6 +127,7 @@
 					() => (soundNeedsGesture = true),
 					() => (soundNeedsGesture = false)
 				);
+				liveAudio.setVolume(audioVolume);
 				if (!soundEnabled) liveAudio.setEnabled(false);
 				if (room?.status === 'active') liveAudio.start();
 			})
@@ -290,6 +299,12 @@
 		liveAudio?.setEnabled(soundEnabled);
 	}
 
+	function changeVolume(volume: number) {
+		audioVolume = volume;
+		waitingAudio?.setVolume(volume);
+		liveAudio?.setVolume(volume);
+	}
+
 	const questionExpired = $derived(
 		Boolean(room?.current_question?.time_limit_seconds && remaining <= 0)
 	);
@@ -325,6 +340,14 @@
 		<section class="room-card">
 			<p class="eyebrow">Live game complete</p>
 			<h1>Well played, {name || 'everyone'}.</h1>
+			<SoundControl
+				enabled={soundEnabled}
+				volume={audioVolume}
+				unavailable={audioUnavailable}
+				needsGesture={soundNeedsGesture}
+				onToggle={toggleWaitingSound}
+				onVolumeChange={changeVolume}
+			/>
 			<Podium entries={room.podium} finalized={true} participantCount={room.participant_count} />
 			<div class="standings">
 				<h2>Final standings</h2>
@@ -400,6 +423,14 @@
 					>
 				</div>
 			{/if}
+			<SoundControl
+				enabled={soundEnabled}
+				volume={audioVolume}
+				unavailable={audioUnavailable}
+				needsGesture={soundNeedsGesture}
+				onToggle={toggleWaitingSound}
+				onVolumeChange={changeVolume}
+			/>
 
 			{#if room.status === 'waiting'}
 				<div class="waiting-state">
@@ -407,28 +438,6 @@
 					<h2>You’re in!</h2>
 					<p>Waiting for the host to start. You can still change your display name.</p>
 					<strong>{room.participant_count} players joined</strong>
-					<button
-						class="waiting-sound-button"
-						type="button"
-						aria-pressed={soundEnabled && !soundNeedsGesture}
-						disabled={audioUnavailable}
-						onclick={toggleWaitingSound}
-					>
-						{audioUnavailable
-							? 'Waiting sound unavailable'
-							: soundNeedsGesture
-								? 'Enable waiting sound'
-								: `Waiting sound ${soundEnabled ? 'on' : 'off'}`}
-					</button>
-					{#if audioUnavailable}
-						<p class="sound-note" role="status">
-							The sound could not be loaded; the game remains available.
-						</p>
-					{:else if soundNeedsGesture}
-						<p class="sound-note" role="status">
-							Your browser needs a tap before it can play sound.
-						</p>
-					{/if}
 				</div>
 			{:else if room.current_question && room.round_phase === 'leaderboard'}
 				<section class="post-round-state" aria-live="polite">
@@ -447,19 +456,6 @@
 							</li>
 						{/each}
 					</ol>
-					<button
-						class="waiting-sound-button"
-						type="button"
-						aria-pressed={soundEnabled && !soundNeedsGesture}
-						disabled={audioUnavailable}
-						onclick={toggleWaitingSound}
-					>
-						{audioUnavailable
-							? 'Sound unavailable'
-							: soundNeedsGesture
-								? 'Enable sound'
-								: `Sound ${soundEnabled ? 'on' : 'off'}`}
-					</button>
 				</section>
 			{:else if room.current_question && room.round_phase === 'answer'}
 				<section class="answer-reveal-state" aria-live="polite">
@@ -481,19 +477,6 @@
 						{/each}
 					</div>
 					<p class="round-state-caption">The host will start the next question shortly.</p>
-					<button
-						class="waiting-sound-button"
-						type="button"
-						aria-pressed={soundEnabled && !soundNeedsGesture}
-						disabled={audioUnavailable}
-						onclick={toggleWaitingSound}
-					>
-						{audioUnavailable
-							? 'Sound unavailable'
-							: soundNeedsGesture
-								? 'Enable sound'
-								: `Sound ${soundEnabled ? 'on' : 'off'}`}
-					</button>
 				</section>
 			{:else if room.current_question && (room.current_question.closed || answeredLocally || room.participant?.answered)}
 				<section class="answer-waiting-state" aria-live="polite">
@@ -511,38 +494,12 @@
 							: 'Keep an eye on the host screen while everyone finishes this round.'}
 					</p>
 					<div class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></div>
-					<button
-						class="waiting-sound-button"
-						type="button"
-						aria-pressed={soundEnabled && !soundNeedsGesture}
-						disabled={audioUnavailable}
-						onclick={toggleWaitingSound}
-					>
-						{audioUnavailable
-							? 'Sound unavailable'
-							: soundNeedsGesture
-								? 'Enable sound'
-								: `Sound ${soundEnabled ? 'on' : 'off'}`}
-					</button>
 				</section>
 			{:else if room.current_question}
 				<div class="question-meta">
 					<span>QUESTION {room.question_index + 1} OF {room.question_count}</span><span
 						>{room.answered_count}/{room.participant_count} answered</span
 					>
-					<button
-						class="waiting-sound-button"
-						type="button"
-						aria-pressed={soundEnabled && !soundNeedsGesture}
-						disabled={audioUnavailable}
-						onclick={toggleWaitingSound}
-					>
-						{audioUnavailable
-							? 'Sound unavailable'
-							: soundNeedsGesture
-								? 'Enable sound'
-								: `Sound ${soundEnabled ? 'on' : 'off'}`}
-					</button>
 				</div>
 				<div
 					class="round-clock"
@@ -748,26 +705,6 @@
 	.waiting-state strong {
 		color: var(--ink-muted);
 		font-size: 0.8rem;
-	}
-	.waiting-sound-button {
-		margin-top: 0.8rem;
-		padding: 0.65rem 0.9rem;
-		border: 1px solid var(--line);
-		border-radius: 0.65rem;
-		background: white;
-		color: var(--navy);
-		font: inherit;
-		font-size: 0.75rem;
-		font-weight: 750;
-		cursor: pointer;
-	}
-	.waiting-sound-button:disabled {
-		cursor: not-allowed;
-		opacity: 0.65;
-	}
-	.waiting-state .sound-note {
-		margin: 0.5rem 0 0;
-		font-size: 0.7rem;
 	}
 	.answer-waiting-state,
 	.post-round-state,
@@ -1014,10 +951,6 @@
 		color: var(--ink-muted);
 		font-size: 0.68rem;
 		font-weight: 800;
-	}
-	.question-meta .waiting-sound-button {
-		margin-top: 0;
-		margin-left: auto;
 	}
 	.round-clock {
 		display: grid;

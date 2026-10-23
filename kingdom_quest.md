@@ -2,7 +2,7 @@
 
 ## Enterprise Product Requirements, Modular Software Architecture, and SDLC Specification
 
-Version 2.0 · Architecture-led rewrite · Rails + SvelteKit + PostgreSQL
+Version 2.1 · Architecture-led rewrite · Rails + SvelteKit + PostgreSQL
 
 KINGDOM Quest should be designed as a production-grade educational gaming and assessment platform, not merely a quiz application. Its architecture must support teacher-paced games, independent learning, assessments, interactive question types, real-time sessions, analytics, gamification, and future integrations without allowing the codebase to become difficult to maintain.
 
@@ -957,7 +957,19 @@ This applies only to correct live answers on timed questions when speed scoring 
 
 Rankings sort by total points descending, then cumulative server-recorded answer time ascending, then display name as a stable final tie-break. Completed participant-paced attempts contribute to a provisional leaderboard. Host-paced room standings include current persisted scores and become final only after the host ends the last round. Results show the top three in a visual podium, with first place centered; rankings remain available below the podium. A ranking is not a substitute for reporting correctness and learning progress.
 
-Hosts choose participant-paced play or instructor-paced live play during session setup. Instructor-paced setup opens a waiting lobby before the host starts the game. The lobby presents the room's six-character code, a locally generated QR code, and a shareable URL on the stable `/join?code={code}` route; it also refreshes the learner roster and answer progress while the room is open. Scanning the QR code or opening the link resolves the room and takes the learner to the display-name form. The host starts and advances the live game from the lobby.
+### 8.7 Results celebration integration requirements
+
+- Reuse the shared results podium for participant-paced results and completed live rooms on both learner and host screens. Show first place in the center, with silver and bronze alongside it, and retain readable names, scores, rank, and full standings.
+- Treat Rails as the sole source of scores, tie-breaking, participant counts, and provisional/final status. The web client may animate and decorate the results, but it must never calculate, reorder, or present unconfirmed rankings as authoritative.
+- Add a browser-only, lazy-loaded Three.js podium scene with original, locally generated stylized learner figures and gold, silver, and bronze platforms. Do not depend on externally hosted character models; any future GLB must have a verified redistribution and commercial-use license recorded with the asset.
+- Use a restrained, one-time entrance animation and optional celebration accent when confirmed results appear. Do not obscure names, scores, answer review, controls, or assistive-technology output.
+- Provide optional, user-controlled audio for answer feedback, quest completion, podium reveal, live countdowns, and waiting rooms. Provide a master volume control wherever game audio is available. Sound must require normal user activation, respect browser autoplay restrictions, and never be required to complete a quest.
+- Keep ambient music soft and cues short. Audio loading, WebGL, and animation failures must leave the text results and learning flow fully usable.
+- Respect `prefers-reduced-motion`, keyboard access, screen-reader semantics, mobile layouts, and low-power devices. Provide a static visual podium when motion is reduced or WebGL is unavailable.
+
+**Implementation tracking:** The reusable podium is connected to the Rails-confirmed participant-paced and live-room results. The WebGL scene uses locally generated geometry rather than licensed third-party models; learner identities and rankings remain in accessible HTML. Completion and podium-reveal cues use original generated audio. Volume controls are available in participant-paced play, live learner rooms, and the live host room. Further celebratory effects should remain optional and be added only when they reinforce learning without changing authoritative results.
+
+Hosts choose participant-paced play or instructor-paced live play during session setup. Instructor-paced setup opens a waiting lobby before the host starts the game. The lobby presents the room's six-character code, a locally generated QR code, and a shareable URL on the stable `/join?code={code}` route; it also refreshes the learner roster  and answer progress while the room is open. Scanning the QR code or opening the link resolves the room and takes the learner to the display-name form. The host starts and advances the live game from the lobby.
 
 Joining supports a six-character uppercase letter-and-number code. The public browser entry point is `/join` (with an optional `?code={code}` query parameter); the application resolves codes through its join API to either a participant-paced activity or a live room. Codes omit ambiguous characters (`I`, `O`, `0`, and `1`). The six-character migration rotates previously issued codes, so hosts must share updated links/codes after deployment. After resolving the code, a learner chooses a display name and may change it until their active live round is answered (or until a self-paced attempt is complete). Guest play does not require an account; Google sign-in is an optional choice and must not block guest access.
 
@@ -1299,6 +1311,7 @@ Define motion tokens for quick interactions, normal transitions, and optional ce
 - Answer selection: immediate, subtle feedback.
 - Question navigation: smooth transition with stable layout.
 - Correct answer: clear confirmation and optional celebration.
+- Quest completion and confirmed podium reveal: brief, optional audio and restrained entrance motion.
 - Incorrect answer: helpful feedback without shaming.
 - Progress: animated indicator with an accessible text equivalent.
 - Leaderboard: restrained movement when rankings change.
@@ -1314,6 +1327,8 @@ Animations must never be the only way to communicate correctness, urgency, or st
 - Respect `prefers-reduced-motion`.
 - Make live per-question countdowns prominent and understandable without announcing every second to screen readers. Participant-paced practice remains untimed.
 - Waiting-room audio is optional and user-controllable on both host and participant screens. Live countdown audio is user-controllable, grows more urgent through the final ten seconds, and keeps all timing and correctness information available visually.
+- Game audio provides a master volume control and distinct completion and podium-reveal cues. These cues play only after user activation and cannot block gameplay.
+- Results reuse the same accessible podium in self-paced and live flows. Three.js is lazy-loaded and decorative; readable HTML remains authoritative and usable if WebGL fails.
 - Stop or fade ambient audio when a quest ends or the player leaves. Audio load failures must not prevent gameplay.
 - Use original, locally generated audio cues. Keep the waiting ambient pad quiet, progressively increase countdown ticks and ambient urgency during the final ten seconds, the correct-answer chord warm, and the incorrect-answer cue soft.
 - Keep question rendering lightweight.

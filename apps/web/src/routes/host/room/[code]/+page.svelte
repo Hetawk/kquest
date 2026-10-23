@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import QRCode from 'qrcode';
 	import Podium from '#lib/features/activities/components/Podium.svelte';
+	import SoundControl from '#lib/features/audio/SoundControl.svelte';
 	import { advanceGameRoom, fetchGameRoom, startGameRoom } from '#lib/features/activities/api.js';
 	import type { GameRoom } from '#lib/features/activities/types.js';
 	import type { PageProps } from './$types';
@@ -18,6 +19,7 @@
 	let hostPage = $state<HTMLElement | null>(null);
 	let isFullscreen = $state(false);
 	let soundEnabled = $state(true);
+	let audioVolume = $state(1);
 	let soundNeedsGesture = $state(false);
 	let audioUnavailable = $state(false);
 	let waitingAudio: import('#lib/features/audio/WaitingRoomAudio.js').WaitingRoomAudio | null =
@@ -83,6 +85,7 @@
 					() => (soundNeedsGesture = true),
 					() => (soundNeedsGesture = false)
 				);
+				waitingAudio.setVolume(audioVolume);
 				if (room?.status === 'waiting') waitingAudio.start();
 			})
 			.catch(() => {
@@ -96,6 +99,7 @@
 					() => (soundNeedsGesture = true),
 					() => (soundNeedsGesture = false)
 				);
+				liveAudio.setVolume(audioVolume);
 				if (!soundEnabled) liveAudio.setEnabled(false);
 				if (room?.status === 'active') liveAudio.start();
 			})
@@ -289,6 +293,12 @@
 		liveAudio?.setEnabled(soundEnabled);
 	}
 
+	function changeVolume(volume: number) {
+		audioVolume = volume;
+		waitingAudio?.setVolume(volume);
+		liveAudio?.setVolume(volume);
+	}
+
 	async function toggleFullscreen() {
 		try {
 			if (document.fullscreenElement === hostPage) {
@@ -314,6 +324,10 @@
 
 	function updateRoom(updated: GameRoom, requestStartedAt: number) {
 		const previousRoom = room;
+		if (previousRoom?.status !== 'completed' && updated.status === 'completed') {
+			liveAudio?.playCompletionCue();
+			liveAudio?.playPodiumReveal();
+		}
 		if (
 			previousRoom?.status === 'active' &&
 			previousRoom.round_phase !== 'answer' &&
@@ -359,15 +373,6 @@
 			? (question.correct_option_ids?.includes(optionId) ?? false)
 			: question.correct_option_id === optionId;
 	}
-
-	function toggleLiveSound() {
-		if (soundNeedsGesture) {
-			liveAudio?.start();
-			return;
-		}
-		soundEnabled = !soundEnabled;
-		liveAudio?.setEnabled(soundEnabled);
-	}
 </script>
 
 <svelte:head>
@@ -396,6 +401,14 @@
 					<h1>{room.title}</h1>
 				</div>
 				<div class="session-tools">
+					<SoundControl
+						enabled={soundEnabled}
+						volume={audioVolume}
+						unavailable={audioUnavailable}
+						needsGesture={soundNeedsGesture}
+						onToggle={toggleWaitingSound}
+						onVolumeChange={changeVolume}
+					/>
 					{#if room.started_at && room.duration_seconds !== null}
 						<span class="session-duration" aria-live="off">
 							Elapsed {formatDuration(room.duration_seconds)}
@@ -435,28 +448,6 @@
 						<div class="invite-content">
 							<p class="eyebrow">INVITE YOUR LEARNERS</p>
 							<h2>Scan to join, or enter the game code</h2>
-							<div class="waiting-audio-control">
-								<button
-									class="fullscreen-button"
-									type="button"
-									aria-pressed={soundEnabled && !soundNeedsGesture}
-									disabled={audioUnavailable}
-									onclick={toggleWaitingSound}
-								>
-									{audioUnavailable
-										? 'Waiting sound unavailable'
-										: soundNeedsGesture
-											? 'Enable waiting sound'
-											: `Waiting sound ${soundEnabled ? 'on' : 'off'}`}
-								</button>
-								{#if audioUnavailable}
-									<span role="status"
-										>The ambient sound could not be loaded; the game remains available.</span
-									>
-								{:else if soundNeedsGesture}
-									<span role="status">Your browser needs a tap before it can play sound.</span>
-								{/if}
-							</div>
 							<p>
 								On a phone or computer, open the join page and enter this code. Scanning the QR code
 								fills it in for them.
@@ -542,19 +533,6 @@
 									</select>
 									<span>of {room.question_count}</span>
 								</label>
-								<button
-									class="fullscreen-button"
-									type="button"
-									aria-pressed={soundEnabled && !soundNeedsGesture}
-									disabled={audioUnavailable}
-									onclick={toggleLiveSound}
-								>
-									{audioUnavailable
-										? 'Sound unavailable'
-										: soundNeedsGesture
-											? 'Enable sound'
-											: `Sound ${soundEnabled ? 'on' : 'off'}`}
-								</button>
 							</div>
 						</div>
 						<div class="review-hero">
@@ -615,19 +593,6 @@
 								</select>
 								<span>of {room.question_count}</span>
 							</label>
-							<button
-								class="fullscreen-button live-sound-button"
-								type="button"
-								aria-pressed={soundEnabled && !soundNeedsGesture}
-								disabled={audioUnavailable}
-								onclick={toggleLiveSound}
-							>
-								{audioUnavailable
-									? 'Sound unavailable'
-									: soundNeedsGesture
-										? 'Enable sound'
-										: `Sound ${soundEnabled ? 'on' : 'off'}`}
-							</button>
 						</div>
 						<p class="eyebrow answer-review-eyebrow">ANSWER REVEAL</p>
 						<h2 id="answer-review-title">{room.current_question.prompt}</h2>
@@ -681,19 +646,6 @@
 								<strong>{room.answered_count}<span> / {room.participant_count}</span></strong>
 								<small>answered this round</small>
 							</div>
-							<button
-								class="fullscreen-button live-sound-button"
-								type="button"
-								aria-pressed={soundEnabled && !soundNeedsGesture}
-								disabled={audioUnavailable}
-								onclick={toggleLiveSound}
-							>
-								{audioUnavailable
-									? 'Sound unavailable'
-									: soundNeedsGesture
-										? 'Enable sound'
-										: `Sound ${soundEnabled ? 'on' : 'off'}`}
-							</button>
 						</div>
 						<h2>{room.current_question.prompt}</h2>
 						<div
@@ -938,18 +890,6 @@
 	}
 	.session-status.completed > span {
 		background: #516487;
-	}
-	.waiting-audio-control {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.5rem;
-		margin: -0.35rem 0 0.9rem;
-	}
-	.waiting-audio-control > span {
-		color: var(--ink-muted);
-		font-size: 0.68rem;
-		line-height: 1.4;
 	}
 	.host-layout {
 		display: grid;
@@ -1458,9 +1398,6 @@
 		font-size: 0.58rem;
 		font-weight: 700;
 	}
-	.live-sound-button {
-		margin-left: auto;
-	}
 	.question-card h2 {
 		margin-block: 1.25rem 0.5rem;
 		font-size: clamp(1.35rem, 3vw, 2rem);
@@ -1818,9 +1755,6 @@
 	.host-page:fullscreen.fullscreen-lobby .host-action-card p:not(.eyebrow) {
 		max-width: 55rem;
 		font-size: clamp(0.95rem, 1.1vw, 1.15rem);
-	}
-	.host-page:fullscreen.fullscreen-lobby .waiting-audio-control {
-		margin-bottom: 1.25rem;
 	}
 	.host-page:fullscreen.fullscreen-lobby .join-code-panel,
 	.host-page:fullscreen.fullscreen-lobby .join-link-panel {

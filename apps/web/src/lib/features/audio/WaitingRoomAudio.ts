@@ -4,6 +4,7 @@ export class WaitingRoomAudio {
 	private readonly ambient: Howl;
 	private enabled = true;
 	private disposed = false;
+	private masterVolume = 1;
 
 	constructor(
 		onLoadError: () => void,
@@ -35,6 +36,11 @@ export class WaitingRoomAudio {
 		this.ambient.mute(!enabled);
 		if (enabled) this.start();
 		else this.stop();
+	}
+
+	setVolume(volume: number) {
+		this.masterVolume = Math.max(0, Math.min(volume, 1));
+		this.ambient.volume(0.09 * this.masterVolume);
 	}
 
 	dispose() {

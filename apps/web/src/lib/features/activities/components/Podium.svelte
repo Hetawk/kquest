@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { LeaderboardEntry } from '../types';
+	import PodiumScene from './PodiumScene.svelte';
 
 	let {
 		entries,
@@ -26,6 +27,7 @@
 	{#if entries.length === 0}
 		<p class="empty-state">The podium is ready. It will appear as players complete a quest.</p>
 	{:else}
+		<PodiumScene />
 		<div class="podium" aria-label="Top three players">
 			{#each [entries[1], entries[0], entries[2]] as entry, index (`${entry?.rank ?? 'empty'}-${index}`)}
 				{#if entry}
@@ -33,6 +35,7 @@
 						class="place-card"
 						class:place-first={entry.rank === 1}
 						class:place-second={entry.rank === 2}
+						class:place-third={entry.rank === 3}
 					>
 						<span class="place-medal" aria-hidden="true"
 							>{entry.rank === 1 ? '✦' : entry.rank === 2 ? 'Ⅱ' : 'Ⅲ'}</span
@@ -121,13 +124,18 @@
 	}
 
 	.place-first {
+		grid-column: 2;
 		min-height: 9rem;
 		border-color: #cfa85d;
 		background: #fffaf0;
 		box-shadow: 0 8px 24px rgb(128 94 37 / 12%);
 	}
 	.place-second {
+		grid-column: 1;
 		min-height: 7.7rem;
+	}
+	.place-third {
+		grid-column: 3;
 	}
 	.place-medal {
 		color: var(--gold-deep);
