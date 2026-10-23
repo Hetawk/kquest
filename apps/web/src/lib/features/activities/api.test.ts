@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { answerPlayQuestion, fetchActivity, listCreatorActivities, startPlaySession } from './api';
+import {
+	answerPlayQuestion,
+	fetchActivity,
+	joinGameRoom,
+	listCreatorActivities,
+	startPlaySession,
+	updateGameRoomCharacter
+} from './api';
 
 function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
@@ -83,6 +90,70 @@ describe('learning journey API client', () => {
 		expect(headers.get('Content-Type')).toBe('application/json');
 		expect(headers.get('Idempotency-Key')).toBe('00000000-0000-4000-8000-000000000001');
 		expect(headers.get('X-CSRF-Token')).toBe('csrf-token');
+	});
+
+	it('joins a live room with a selected learner character', async () => {
+		const fetchMock = vi.fn<typeof fetch>((input, init) => {
+			const path = String(input);
+			if (init?.credentials !== 'same-origin') {
+				return Promise.reject(new Error('Expected same-origin credentials.'));
+			}
+			if (path === '/api/v1/auth/csrf') {
+				return Promise.resolve(jsonResponse({ data: { token: 'csrf-token' } }));
+			}
+			return Promise.resolve(
+				jsonResponse(
+					{
+						data: {
+							session_id: 'session-id',
+							learner_name: 'Jordan',
+							avatar_id: 'panda',
+							room: { room_code: 'ABCD23' }
+						}
+					},
+					201
+				)
+			);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		await joinGameRoom({
+			roomCode: 'ABCD23',
+			learnerName: 'Jordan',
+			avatarId: 'panda',
+			idempotencyKey: '00000000-0000-4000-8000-000000000004'
+		});
+
+		const [path, init] = fetchMock.mock.calls.at(-1)!;
+		expect(path).toBe('/api/v1/game_rooms/ABCD23/participants');
+		expect(init?.body).toBe(
+			JSON.stringify({ participant: { learner_name: 'Jordan', avatar_id: 'panda' } })
+		);
+	});
+
+	it('persists a live room character change', async () => {
+		const fetchMock = vi.fn<typeof fetch>((input, init) => {
+			const path = String(input);
+			if (init?.credentials !== 'same-origin') {
+				return Promise.reject(new Error('Expected same-origin credentials.'));
+			}
+			if (path === '/api/v1/auth/csrf') {
+				return Promise.resolve(jsonResponse({ data: { token: 'csrf-token' } }));
+			}
+			return Promise.resolve(jsonResponse({ data: { learner_name: 'Jordan', avatar_id: 'owl' } }));
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		await updateGameRoomCharacter({
+			roomCode: 'ABCD23',
+			sessionId: 'session-id',
+			avatarId: 'owl'
+		});
+
+		const [path, init] = fetchMock.mock.calls.at(-1)!;
+		expect(path).toBe('/api/v1/game_rooms/ABCD23/participants/session-id');
+		expect(init?.method).toBe('PATCH');
+		expect(init?.body).toBe(JSON.stringify({ participant: { avatar_id: 'owl' } }));
 	});
 
 	it('posts the current answer with a retry key and supports unanswered timeout responses', async () => {

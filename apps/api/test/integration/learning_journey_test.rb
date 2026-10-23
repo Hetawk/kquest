@@ -95,9 +95,11 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     response.parsed_body.dig("data", "room_code")
   end
 
-  def join_game_room(room_code:, name:)
+  def join_game_room(room_code:, name:, avatar_id: nil)
+    participant = { learner_name: name }
+    participant[:avatar_id] = avatar_id if avatar_id
     post "/api/v1/game_rooms/#{room_code}/participants",
-      params: { participant: { learner_name: name } },
+      params: { participant: },
       headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
       as: :json
     assert_response :created
@@ -565,7 +567,14 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal "/room/#{room_code}", response.parsed_body.dig("data", "path")
 
     post "/api/v1/game_rooms/#{room_code}/participants",
-      params: { participant: { learner_name: "Jordan" } },
+      params: { participant: { learner_name: "Invalid", avatar_id: "wizard" } },
+      headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :unprocessable_entity
+    assert_equal "invalid_avatar", response.parsed_body.dig("error", "code")
+
+    post "/api/v1/game_rooms/#{room_code}/participants",
+      params: { participant: { learner_name: "Jordan", avatar_id: "panda" } },
       headers: { "Idempotency-Key" => SecureRandom.uuid, "X-CSRF-Token" => fetch_csrf_token },
       as: :json
     assert_response :created
@@ -576,7 +585,23 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_response :success
     participant = response.parsed_body.dig("data", "participants").first
     assert_equal "Jordan", participant.fetch("learner_name")
+    assert_equal "panda", participant.fetch("avatar_id")
     assert_equal false, participant.fetch("answered")
+    assert_equal "fox", response.parsed_body.dig("data", "participants").second.fetch("avatar_id")
+
+    patch "/api/v1/game_rooms/#{room_code}/participants/#{session_id}",
+      params: { participant: { avatar_id: "unicorn" } },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :success
+    assert_equal "unicorn", response.parsed_body.dig("data", "avatar_id")
+
+    patch "/api/v1/game_rooms/#{room_code}/participants/#{session_id}",
+      params: { participant: { avatar_id: "wizard" } },
+      headers: { "X-CSRF-Token" => fetch_csrf_token },
+      as: :json
+    assert_response :unprocessable_entity
+    assert_equal "invalid_avatar", response.parsed_body.dig("error", "code")
 
     patch "/api/v1/game_rooms/#{room_code}/participants/#{session_id}",
       params: { participant: { learner_name: "Jordan Updated" } },
@@ -584,6 +609,10 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
       as: :json
     assert_response :success
     assert_equal "Jordan Updated", response.parsed_body.dig("data", "learner_name")
+
+    get "/api/v1/game_rooms/#{room_code}"
+    assert_response :success
+    assert_equal "unicorn", response.parsed_body.dig("data", "participants").first.fetch("avatar_id")
 
     post "/api/v1/game_rooms/#{room_code}/start",
       headers: { "X-CSRF-Token" => fetch_csrf_token },

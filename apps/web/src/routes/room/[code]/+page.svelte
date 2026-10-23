@@ -2,12 +2,20 @@
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
 	import Podium from '#lib/features/activities/components/Podium.svelte';
+	import CharacterAvatar from '#lib/features/activities/components/CharacterAvatar.svelte';
+	import CharacterPicker from '#lib/features/activities/components/CharacterPicker.svelte';
+	import {
+		DEFAULT_CHARACTER_ID,
+		isLearnerCharacterId,
+		type LearnerCharacterId
+	} from '#lib/features/activities/characters.js';
 	import SoundControl from '#lib/features/audio/SoundControl.svelte';
 	import {
 		answerGameRoomQuestion,
 		fetchGameRoom,
 		joinGameRoom,
-		renameGameRoomParticipant
+		renameGameRoomParticipant,
+		updateGameRoomCharacter
 	} from '#lib/features/activities/api.js';
 	import type { GameRoom } from '#lib/features/activities/types.js';
 	import type { PageProps } from './$types';
@@ -16,6 +24,7 @@
 	const roomCode = $derived(data.code.toUpperCase());
 	let room = $state<GameRoom | null>(null);
 	let name = $state('');
+	let avatarId = $state<LearnerCharacterId>(DEFAULT_CHARACTER_ID);
 	let sessionId = $state('');
 	let selectedOptionIds = $state<string[]>([]);
 	let error = $state('');
@@ -24,6 +33,7 @@
 	let joining = $state(false);
 	let submitting = $state(false);
 	let savingName = $state(false);
+	let savingCharacter = $state(false);
 	let editingName = $state(false);
 	let remaining = $state(0);
 	let deadlineAt = 0;
@@ -48,9 +58,14 @@
 		const stored = window.localStorage.getItem(storageKey);
 		if (stored) {
 			try {
-				const parsed = JSON.parse(stored) as { sessionId?: string; name?: string };
+				const parsed = JSON.parse(stored) as {
+					sessionId?: string;
+					name?: string;
+					avatarId?: string;
+				};
 				sessionId = parsed.sessionId ?? '';
 				name = parsed.name ?? '';
+				if (isLearnerCharacterId(parsed.avatarId)) avatarId = parsed.avatarId;
 			} catch {
 				window.localStorage.removeItem(storageKey);
 			}
@@ -78,6 +93,9 @@
 				}
 				if (updated.participant) {
 					name = updated.participant.learner_name;
+					if (!savingCharacter && isLearnerCharacterId(updated.participant.avatar_id)) {
+						avatarId = updated.participant.avatar_id;
+					}
 					if (previousIndex !== updated.question_index) {
 						selectedOptionIds = [];
 						feedback = '';
@@ -86,7 +104,7 @@
 						timeoutSent = false;
 					}
 					if (updated.participant.answered) answeredLocally = true;
-					window.localStorage.setItem(storageKey, JSON.stringify({ sessionId, name }));
+					window.localStorage.setItem(storageKey, JSON.stringify({ sessionId, name, avatarId }));
 				}
 				const adjustedSeconds = Math.max(
 					0,
@@ -220,12 +238,19 @@
 			const joined = await joinGameRoom({
 				roomCode,
 				learnerName: name.trim(),
+				avatarId,
 				idempotencyKey: crypto.randomUUID()
 			});
 			sessionId = joined.session_id;
 			name = joined.learner_name;
 			room = joined.room;
-			window.localStorage.setItem(`kquest-room:${roomCode}`, JSON.stringify({ sessionId, name }));
+			if (isLearnerCharacterId(joined.room.participant?.avatar_id)) {
+				avatarId = joined.room.participant.avatar_id;
+			}
+			window.localStorage.setItem(
+				`kquest-room:${roomCode}`,
+				JSON.stringify({ sessionId, name, avatarId })
+			);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'You could not join this room.';
 		} finally {
@@ -245,12 +270,44 @@
 				learnerName: name.trim()
 			});
 			name = updated.learner_name;
-			window.localStorage.setItem(`kquest-room:${roomCode}`, JSON.stringify({ sessionId, name }));
+			window.localStorage.setItem(
+				`kquest-room:${roomCode}`,
+				JSON.stringify({ sessionId, name, avatarId })
+			);
 			editingName = false;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Your display name could not be changed.';
 		} finally {
 			savingName = false;
+		}
+	}
+
+	async function changeCharacter(id: LearnerCharacterId) {
+		if (id === avatarId || savingCharacter) return;
+		avatarId = id;
+		error = '';
+		if (!sessionId) return;
+
+		savingCharacter = true;
+		try {
+			const updated = await updateGameRoomCharacter({
+				roomCode,
+				sessionId,
+				avatarId: id
+			});
+			if (isLearnerCharacterId(updated.avatar_id)) avatarId = updated.avatar_id;
+			window.localStorage.setItem(
+				`kquest-room:${roomCode}`,
+				JSON.stringify({ sessionId, name, avatarId })
+			);
+		} catch (cause) {
+			avatarId =
+				room?.participant?.avatar_id && isLearnerCharacterId(room.participant.avatar_id)
+					? room.participant.avatar_id
+					: DEFAULT_CHARACTER_ID;
+			error = cause instanceof Error ? cause.message : 'Your character could not be changed.';
+		} finally {
+			savingCharacter = false;
 		}
 	}
 
@@ -352,7 +409,10 @@
 			<div class="standings">
 				<h2>Final standings</h2>
 				{#each room.standings as entry (entry.rank)}<div class="standing-row">
-						<span>#{entry.rank}</span><strong>{entry.learner_name}</strong><b>{entry.score} pts</b>
+						<span>#{entry.rank}</span><CharacterAvatar
+							avatarId={entry.avatar_id}
+							size="small"
+						/><strong>{entry.learner_name}</strong><b>{entry.score} pts</b>
 					</div>{/each}
 			</div>
 		</section>
@@ -372,6 +432,11 @@
 					autocomplete="nickname"
 					bind:value={name}
 					required
+				/>
+				<CharacterPicker
+					selectedId={avatarId}
+					disabled={joining}
+					onSelect={(id) => void changeCharacter(id)}
 				/>
 				<button
 					class="button button-primary"
@@ -414,7 +479,10 @@
 				</form>
 			{:else}
 				<div class="player-label">
-					<span>Playing as <strong>{name}</strong></span><button
+					<span class="player-identity">
+						<CharacterAvatar {avatarId} size="small" />
+						<span>Playing as <strong>{name}</strong></span>
+					</span><button
 						type="button"
 						class="text-button"
 						onclick={() => (editingName = true)}
@@ -423,6 +491,14 @@
 					>
 				</div>
 			{/if}
+			<CharacterPicker
+				selectedId={avatarId}
+				disabled={savingCharacter}
+				onSelect={(id) => void changeCharacter(id)}
+			/>
+			{#if savingCharacter}<p class="character-save-status" role="status">
+					Saving your character…
+				</p>{/if}
 			<SoundControl
 				enabled={soundEnabled}
 				volume={audioVolume}
@@ -451,6 +527,7 @@
 						{#each room.standings as entry (entry.rank)}
 							<li class:player-leader={entry.rank === 1}>
 								<span class="player-rank">#{entry.rank}</span>
+								<CharacterAvatar avatarId={entry.avatar_id} size="small" />
 								<strong>{entry.learner_name}</strong>
 								<b>{entry.score} pts</b>
 							</li>
@@ -651,6 +728,11 @@
 	}
 	.player-label strong {
 		color: var(--navy);
+	}
+	.player-identity {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.55rem;
 	}
 	.text-button {
 		padding: 0.35rem;
@@ -1098,7 +1180,7 @@
 	}
 	.standing-row {
 		display: grid;
-		grid-template-columns: 2.5rem 1fr auto;
+		grid-template-columns: 2.5rem 2rem minmax(0, 1fr) auto;
 		gap: 0.6rem;
 		padding: 0.7rem 0;
 		border-top: 1px solid var(--line);

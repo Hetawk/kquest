@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import QRCode from 'qrcode';
 	import Podium from '#lib/features/activities/components/Podium.svelte';
+	import CharacterAvatar from '#lib/features/activities/components/CharacterAvatar.svelte';
 	import SoundControl from '#lib/features/audio/SoundControl.svelte';
 	import { advanceGameRoom, fetchGameRoom, startGameRoom } from '#lib/features/activities/api.js';
 	import type { GameRoom } from '#lib/features/activities/types.js';
@@ -39,7 +40,6 @@
 	const joinLink = $derived(
 		typeof window === 'undefined' ? '' : createJoinLink(window.location.origin, roomCode)
 	);
-	const avatarIcons = ['✦', '☼', '◆', '✧', '◈', '✺', '✳', '◇'];
 
 	function createJoinLink(origin: string, code: string) {
 		const url = new URL(resolve('/join'), origin);
@@ -278,10 +278,6 @@
 		}
 	}
 
-	function participantIcon(index: number) {
-		return avatarIcons[index % avatarIcons.length];
-	}
-
 	function toggleWaitingSound() {
 		if (soundNeedsGesture) {
 			waitingAudio?.start();
@@ -458,12 +454,25 @@
 									<strong class="share-code">{room.room_code}</strong>
 								</div>
 								<button
-									class="copy-icon-button"
+									class="copy-code-button"
 									type="button"
-									aria-label="Copy game code"
+									aria-label={copied === 'code' ? 'Game code copied' : 'Copy game code'}
 									onclick={() => copyValue('code')}
 								>
-									{copied === 'code' ? '✓' : '▢'}
+									{#if copied === 'code'}
+										<svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+											<path d="m4 10 4 4 8-8" />
+										</svg>
+										<span>Copied</span>
+									{:else}
+										<svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+											<rect x="7" y="6" width="9" height="11" rx="1.5" />
+											<path
+												d="M13 6V4.5A1.5 1.5 0 0 0 11.5 3h-7A1.5 1.5 0 0 0 3 4.5v9A1.5 1.5 0 0 0 4.5 15H7"
+											/>
+										</svg>
+										<span>Copy code</span>
+									{/if}
 								</button>
 							</div>
 							<div class="join-link-panel">
@@ -548,6 +557,7 @@
 								{@const movement = rankMovement(entry)}
 								<li class:review-leader={entry.rank === 1}>
 									<span class="review-rank">#{entry.rank}</span>
+									<CharacterAvatar avatarId={entry.avatar_id} size="small" />
 									<span class="review-player">
 										<strong>{entry.learner_name}</strong>
 										<small>{entry.score} points</small>
@@ -698,9 +708,10 @@
 							<h3>Final standings</h3>
 							{#each room.standings as entry (entry.rank)}
 								<div class="standing-row">
-									<span>#{entry.rank}</span><strong>{entry.learner_name}</strong><b
-										>{entry.score} pts</b
-									>
+									<span>#{entry.rank}</span><CharacterAvatar
+										avatarId={entry.avatar_id}
+										size="small"
+									/><strong>{entry.learner_name}</strong><b>{entry.score} pts</b>
 								</div>
 							{/each}
 						</div>
@@ -729,7 +740,7 @@
 					<ul class="participant-list" aria-live="polite" aria-relevant="additions text">
 						{#each room.participants as participant, index (`${participant.learner_name}-${index}`)}
 							<li>
-								<span class="avatar" aria-hidden="true">{participantIcon(index)}</span>
+								<CharacterAvatar avatarId={participant.avatar_id} size="small" />
 								<strong>{participant.learner_name}</strong>
 							</li>
 						{/each}
@@ -747,6 +758,7 @@
 							{@const movement = rankMovement(entry)}
 							<li class:leader={entry.rank === 1}>
 								<span class="leaderboard-rank">#{entry.rank}</span>
+								<CharacterAvatar avatarId={entry.avatar_id} size="small" />
 								<span class="leaderboard-player">
 									<strong>{entry.learner_name}</strong>
 									<small>{entry.score} pts</small>
@@ -961,17 +973,37 @@
 			sans-serif;
 		letter-spacing: 0.2em;
 	}
-	.copy-icon-button {
-		display: grid;
-		width: 2.55rem;
-		height: 2.55rem;
-		place-items: center;
-		border: 1px solid var(--line);
-		border-radius: 0.65rem;
-		background: white;
+	.copy-code-button {
+		display: inline-flex;
+		min-height: 2.75rem;
+		flex: 0 0 auto;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.65rem 0.85rem;
+		border: 1px solid #d9d5ca;
+		border-radius: 0.7rem;
+		background: #fff;
 		color: var(--navy);
-		font-size: 1.2rem;
+		font: inherit;
+		font-size: 0.76rem;
+		font-weight: 800;
 		cursor: pointer;
+	}
+	.copy-code-button:hover {
+		border-color: #c8a061;
+		background: #fffaf0;
+	}
+	.copy-code-button:active {
+		transform: translateY(1px);
+	}
+	.copy-code-button svg {
+		width: 1.1rem;
+		height: 1.1rem;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 1.7;
 	}
 	.join-link-panel {
 		display: flex;
@@ -1128,26 +1160,6 @@
 		gap: 0.65rem;
 		padding: 0.65rem 0.2rem;
 		border-top: 1px solid #eeece6;
-	}
-	.avatar {
-		display: grid;
-		width: 2.2rem;
-		height: 2.2rem;
-		flex: 0 0 auto;
-		place-items: center;
-		border-radius: 50%;
-		background: #f1eadc;
-		color: var(--navy);
-		font-size: 0.95rem;
-		font-weight: 850;
-	}
-	.participant-list li:nth-child(3n + 2) .avatar {
-		background: #eaf0f6;
-		color: #35567d;
-	}
-	.participant-list li:nth-child(3n) .avatar {
-		background: #f6e9e7;
-		color: #8e463a;
 	}
 	.participant-list li strong {
 		overflow: hidden;
@@ -1506,7 +1518,7 @@
 	}
 	.standing-row {
 		display: grid;
-		grid-template-columns: 2rem 1fr auto;
+		grid-template-columns: 2rem 2rem minmax(0, 1fr) auto;
 		gap: 0.6rem;
 		align-items: center;
 		padding: 0.7rem 0;
@@ -1705,8 +1717,14 @@
 	}
 	.host-page:fullscreen.fullscreen-lobby {
 		box-sizing: border-box;
-		min-height: 100vh;
-		padding: clamp(1.5rem, 3vh, 3rem) clamp(1.5rem, 5vw, 5rem);
+		display: flex;
+		height: 100vh;
+		height: 100dvh;
+		min-height: 0;
+		flex-direction: column;
+		gap: clamp(0.45rem, 1.2vh, 1rem);
+		overflow: hidden;
+		padding: clamp(0.6rem, 1.5vh, 1.25rem) clamp(1rem, 4vw, 4rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .session-header,
 	.host-page:fullscreen.fullscreen-lobby .host-layout,
@@ -1715,165 +1733,224 @@
 		width: min(100%, 112rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .session-heading {
-		padding-bottom: clamp(1.5rem, 3vh, 2.5rem);
+		align-items: center;
+		padding-bottom: clamp(0.5rem, 1.2vh, 1rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .session-heading h1 {
-		font-size: clamp(2.25rem, 4vw, 4rem);
+		font-size: clamp(1.75rem, 3.3vw, 3.5rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .eyebrow {
-		font-size: clamp(0.72rem, 0.9vw, 0.9rem);
+		font-size: clamp(0.64rem, 0.8vw, 0.8rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .session-tools {
-		gap: 0.8rem;
+		gap: clamp(0.35rem, 0.8vw, 0.8rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .fullscreen-button,
 	.host-page:fullscreen.fullscreen-lobby .session-status {
-		padding: 0.75rem 1rem;
-		font-size: 0.9rem;
+		padding: 0.6rem 0.8rem;
+		font-size: clamp(0.68rem, 0.85vw, 0.85rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .host-layout {
+		flex: 1 1 auto;
+		min-height: 0;
 		grid-template-columns: minmax(0, 1.7fr) minmax(20rem, 0.9fr);
 		align-items: stretch;
-		gap: clamp(1.25rem, 2vw, 2rem);
-		min-height: max(36rem, calc(100vh - 12rem));
+		gap: clamp(0.75rem, 1.5vw, 1.5rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .host-main {
+		min-height: 0;
 		grid-template-rows: minmax(0, 1fr) auto;
-		gap: clamp(1.25rem, 2vh, 2rem);
+		gap: clamp(0.55rem, 1vh, 1rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .invite-card {
-		grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.48fr);
+		min-height: 0;
+		grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.42fr);
 		align-items: stretch;
-		gap: clamp(1.25rem, 2vw, 2rem);
-		padding: clamp(1.75rem, 3vw, 3rem);
+		gap: clamp(0.75rem, 1.5vw, 1.5rem);
+		padding: clamp(0.85rem, 1.7vw, 1.75rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .invite-content h2,
 	.host-page:fullscreen.fullscreen-lobby .host-action-card h2 {
-		font-size: clamp(1.65rem, 2.5vw, 2.4rem);
+		font-size: clamp(1.25rem, 2.1vw, 2rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .invite-content > p:not(.eyebrow),
 	.host-page:fullscreen.fullscreen-lobby .host-action-card p:not(.eyebrow) {
-		max-width: 55rem;
-		font-size: clamp(0.95rem, 1.1vw, 1.15rem);
+		max-width: 45rem;
+		margin-bottom: clamp(0.45rem, 1vh, 0.85rem);
+		font-size: clamp(0.75rem, 0.95vw, 0.95rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .join-code-panel,
 	.host-page:fullscreen.fullscreen-lobby .join-link-panel {
-		padding: clamp(1rem, 1.5vw, 1.5rem);
+		padding: clamp(0.65rem, 1vw, 1rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .share-label {
-		font-size: 0.75rem;
+		font-size: clamp(0.58rem, 0.68vw, 0.68rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .share-code {
-		font-size: clamp(2.75rem, 5vw, 4.5rem);
+		font-size: clamp(2rem, 4vw, 3.6rem);
 	}
-	.host-page:fullscreen.fullscreen-lobby .copy-icon-button {
-		width: 3.25rem;
-		height: 3.25rem;
+	.host-page:fullscreen.fullscreen-lobby .copy-code-button {
+		min-height: 2.8rem;
+		padding-inline: 0.85rem;
+		font-size: clamp(0.7rem, 0.85vw, 0.85rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .join-link-copy a {
-		font-size: clamp(0.9rem, 1.1vw, 1.1rem);
+		font-size: clamp(0.75rem, 0.95vw, 0.95rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .join-link-copy small {
-		font-size: 0.8rem;
+		font-size: clamp(0.62rem, 0.72vw, 0.72rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .join-link-panel .button,
 	.host-page:fullscreen.fullscreen-lobby .share-button {
-		font-size: 0.9rem;
+		font-size: clamp(0.7rem, 0.85vw, 0.85rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .qr-panel {
-		min-height: 100%;
-		padding: clamp(1rem, 2vw, 2rem);
+		min-height: 0;
+		padding: clamp(0.6rem, 1vw, 1rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .qr-panel img,
 	.host-page:fullscreen.fullscreen-lobby .qr-placeholder {
-		width: min(100%, 17rem);
+		width: min(100%, 17rem, 32vh);
 	}
 	.host-page:fullscreen.fullscreen-lobby .qr-panel strong {
-		font-size: 1rem;
+		font-size: clamp(0.78rem, 0.95vw, 0.95rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .qr-panel > span {
-		font-size: 0.85rem;
+		font-size: clamp(0.62rem, 0.75vw, 0.75rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .host-action-card {
-		padding: clamp(1.5rem, 2.5vw, 2.5rem);
+		padding: clamp(0.75rem, 1.3vw, 1.25rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .host-action-card .button {
-		padding: 1rem 1.5rem;
-		font-size: 1rem;
+		padding: 0.75rem 1rem;
+		font-size: clamp(0.75rem, 0.9vw, 0.9rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .participants-panel {
+		box-sizing: border-box;
 		position: static;
-		min-height: 100%;
-		padding: clamp(1.5rem, 2.5vw, 2.5rem);
+		display: flex;
+		min-height: 0;
+		flex-direction: column;
+		overflow: hidden;
+		padding: clamp(0.85rem, 1.6vw, 1.5rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .participants-heading h2 {
-		font-size: 1.6rem;
+		font-size: clamp(1.15rem, 1.65vw, 1.6rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .participant-count {
-		min-width: 2.75rem;
-		height: 2.75rem;
-		font-size: 1rem;
+		min-width: 2.25rem;
+		height: 2.25rem;
+		font-size: 0.85rem;
 	}
 	.host-page:fullscreen.fullscreen-lobby .participants-caption {
-		font-size: 0.9rem;
+		margin-bottom: 0.6rem;
+		font-size: clamp(0.7rem, 0.8vw, 0.8rem);
 	}
 	.host-page:fullscreen.fullscreen-lobby .empty-participants {
-		min-height: 20rem;
+		flex: 1;
+		min-height: 0;
 		align-content: center;
-		gap: 0.9rem;
+		gap: 0.65rem;
+		padding: 1rem;
 	}
 	.host-page:fullscreen.fullscreen-lobby .empty-people {
-		width: 4.5rem;
-		height: 4.5rem;
-		font-size: 2.25rem;
+		width: 3.5rem;
+		height: 3.5rem;
+		font-size: 1.75rem;
 	}
 	.host-page:fullscreen.fullscreen-lobby .empty-participants strong {
-		font-size: 1.1rem;
+		font-size: 0.95rem;
 	}
 	.host-page:fullscreen.fullscreen-lobby .empty-participants > span:last-child {
-		max-width: 20rem;
-		font-size: 0.9rem;
+		max-width: 18rem;
+		font-size: 0.78rem;
 	}
-	.host-page:fullscreen.fullscreen-lobby .participant-list li {
-		gap: 0.9rem;
-		padding-block: 0.9rem;
-	}
-	.host-page:fullscreen.fullscreen-lobby .avatar {
-		width: 2.75rem;
-		height: 2.75rem;
-		font-size: 1.1rem;
-	}
-	.host-page:fullscreen.fullscreen-lobby .participant-list li strong {
-		font-size: 1rem;
+	.host-page:fullscreen.fullscreen-lobby .participant-list {
+		min-height: 0;
+		max-height: none;
+		flex: 1;
 	}
 	.host-page:fullscreen.fullscreen-lobby .room-capacity-note {
-		font-size: 0.8rem;
+		margin-top: 0.75rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participant-list li {
+		gap: 0.65rem;
+		padding-block: 0.55rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .participant-list li strong {
+		font-size: 0.85rem;
+	}
+	.host-page:fullscreen.fullscreen-lobby .room-capacity-note {
+		font-size: 0.68rem;
 	}
 	@media (max-width: 900px) {
 		.host-page:fullscreen.fullscreen-lobby .host-layout {
 			grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
 		}
 		.host-page:fullscreen.fullscreen-lobby .invite-card {
-			grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.45fr);
+			grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.45fr);
 		}
 	}
 	@media (max-width: 680px) {
 		.host-page:fullscreen.fullscreen-lobby .host-layout {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr);
+			grid-template-rows: minmax(0, 1fr) auto;
 		}
 		.host-page:fullscreen.fullscreen-lobby .participants-panel {
 			grid-row: auto;
-			min-height: 20rem;
+			max-height: 8.5rem;
+			padding: 0.55rem 0.75rem;
 		}
 		.host-page:fullscreen.fullscreen-lobby .invite-card {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr) minmax(7rem, 0.42fr);
 		}
 		.host-page:fullscreen.fullscreen-lobby .qr-panel {
-			min-height: 15rem;
+			min-height: 0;
+		}
+		.host-page:fullscreen.fullscreen-lobby .participants-caption {
+			margin: 0.25rem 0;
+		}
+		.host-page:fullscreen.fullscreen-lobby .empty-participants {
+			display: flex;
+			min-height: 0;
+			flex: initial;
+			align-items: center;
+			justify-content: flex-start;
+			gap: 0.4rem;
+			padding: 0;
+			text-align: left;
+		}
+		.host-page:fullscreen.fullscreen-lobby .empty-people,
+		.host-page:fullscreen.fullscreen-lobby .empty-participants > span:last-child,
+		.host-page:fullscreen.fullscreen-lobby .room-capacity-note {
+			display: none;
 		}
 		.host-page:fullscreen.fullscreen-lobby .qr-panel img,
 		.host-page:fullscreen.fullscreen-lobby .qr-placeholder {
-			width: min(100%, 10rem);
+			width: min(100%, 7rem, 20vh);
+		}
+	}
+	@media (max-height: 650px) {
+		.host-page:fullscreen.fullscreen-lobby .back-link {
+			margin-bottom: 0.25rem;
+			font-size: 0.68rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .session-heading {
+			padding-bottom: 0.35rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .invite-card {
+			padding: 0.65rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .invite-content > p:not(.eyebrow) {
+			margin-bottom: 0.4rem;
+			line-height: 1.4;
+		}
+		.host-page:fullscreen.fullscreen-lobby .join-code-panel,
+		.host-page:fullscreen.fullscreen-lobby .join-link-panel {
+			padding: 0.5rem 0.65rem;
+		}
+		.host-page:fullscreen.fullscreen-lobby .host-action-card {
+			padding: 0.6rem 0.8rem;
 		}
 	}
 </style>

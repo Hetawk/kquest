@@ -1,3 +1,5 @@
+import type { LearnerCharacterId } from './characters.js';
+
 export type ChoiceOption = {
 	id: string;
 	text: string;
@@ -69,6 +71,7 @@ export type AttemptResult = {
 export type LeaderboardEntry = {
 	rank: number;
 	learner_name: string;
+	avatar_id?: LearnerCharacterId;
 	participant_key?: string;
 	score: number;
 	max_score: number | null;
@@ -98,8 +101,17 @@ export type GameRoom = {
 	server_time: string;
 	participant_count: number;
 	answered_count: number;
-	participants: Array<{ learner_name: string; completed: boolean; answered: boolean }>;
-	participant: { learner_name: string; answered: boolean } | null;
+	participants: Array<{
+		learner_name: string;
+		avatar_id?: LearnerCharacterId;
+		completed: boolean;
+		answered: boolean;
+	}>;
+	participant: {
+		learner_name: string;
+		avatar_id?: LearnerCharacterId;
+		answered: boolean;
+	} | null;
 	standings: LeaderboardEntry[];
 	podium: LeaderboardEntry[];
 	standings_final: boolean;
@@ -144,4 +156,9 @@ export type PublishedActivity = {
 };
 
 export type ResolvedJoinCode = { kind: 'live_room' | 'self_paced'; path: string };
-export type JoinedGameRoom = { session_id: string; learner_name: string; room: GameRoom };
+export type JoinedGameRoom = {
+	session_id: string;
+	learner_name: string;
+	avatar_id: LearnerCharacterId;
+	room: GameRoom;
+};

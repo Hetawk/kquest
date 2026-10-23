@@ -759,9 +759,29 @@ paths:
                       type: string
                       minLength: 1
                       maxLength: 80
+                    avatar_id:
+                      $ref: "#/components/schemas/LearnerCharacterId"
       responses:
+        "200":
+          description: Existing participant returned for an idempotent retry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/JoinedGameRoom"
         "201":
           description: Guest joined the waiting room.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/JoinedGameRoom"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
@@ -784,8 +804,8 @@ paths:
           description: Room is not waiting.
   /game_rooms/{room_code}/participants/{session_id}:
     patch:
-      operationId: renameGameRoomParticipant
-      summary: Change a participant display name before answering the active round
+      operationId: updateGameRoomParticipant
+      summary: Change a participant display name or character
       parameters:
         - $ref: "#/components/parameters/RoomCode"
         - name: session_id
@@ -805,15 +825,31 @@ paths:
               properties:
                 participant:
                   type: object
-                  required: [learner_name]
+                  minProperties: 1
                   properties:
                     learner_name:
                       type: string
                       minLength: 1
                       maxLength: 80
+                    avatar_id:
+                      $ref: "#/components/schemas/LearnerCharacterId"
       responses:
         "200":
-          description: Display name changed.
+          description: Participant profile updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [learner_name, avatar_id]
+                    properties:
+                      learner_name:
+                        type: string
+                      avatar_id:
+                        $ref: "#/components/schemas/LearnerCharacterId"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -1536,6 +1572,8 @@ components:
           minimum: 1
         learner_name:
           type: string
+        avatar_id:
+          $ref: "#/components/schemas/LearnerCharacterId"
         score:
           type: integer
           minimum: 0
@@ -1544,6 +1582,9 @@ components:
         response_time_ms:
           type: integer
           minimum: 0
+    LearnerCharacterId:
+      type: string
+      enum: [fox, panda, lion, frog, cat, penguin, tiger, rabbit, owl, unicorn, koala, dragon]
     GameRoom:
       type: object
       required: [room_code, title, status, question_index, question_count, current_question, question_started_at, time_remaining_seconds, server_time, participant_count, answered_count, participants, participant, standings, podium, standings_final]
@@ -1578,17 +1619,29 @@ components:
           type: array
           items:
             type: object
-            required: [learner_name, completed, answered]
+            required: [learner_name, avatar_id, completed, answered]
             properties:
               learner_name:
                 type: string
+              avatar_id:
+                $ref: "#/components/schemas/LearnerCharacterId"
               completed:
                 type: boolean
               answered:
                 type: boolean
                 description: Whether this participant answered the currently active question.
         participant:
-          type: [object, "null"]
+          oneOf:
+            - type: object
+              required: [learner_name, avatar_id, answered]
+              properties:
+                learner_name:
+                  type: string
+                avatar_id:
+                  $ref: "#/components/schemas/LearnerCharacterId"
+                answered:
+                  type: boolean
+            - type: "null"
         standings:
           type: array
           items:
@@ -1600,6 +1653,19 @@ components:
             $ref: "#/components/schemas/LeaderboardEntry"
         standings_final:
           type: boolean
+    JoinedGameRoom:
+      type: object
+      required: [session_id, learner_name, avatar_id, room]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        learner_name:
+          type: string
+        avatar_id:
+          $ref: "#/components/schemas/LearnerCharacterId"
+        room:
+          $ref: "#/components/schemas/GameRoom"
     ErrorResponse:
       type: object
       required: [error]

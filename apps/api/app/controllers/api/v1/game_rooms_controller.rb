@@ -40,17 +40,22 @@ module Api
         room = GameRoom.includes(:activity_version).find_by(room_code: normalized_room_code)
         return render_not_found unless room
 
-        attributes = params.require(:participant).permit(:learner_name)
+        attributes = params.require(:participant).permit(:learner_name, :avatar_id)
+        avatar_id = attributes[:avatar_id].presence || PlaySession::DEFAULT_AVATAR_ID
+        return render_invalid_avatar unless PlaySession::AVATAR_IDS.include?(avatar_id)
+
         session, repeated = Assessments::Services::StartPlaySession.call(
           activity_version: room.activity_version,
           learner_name: attributes[:learner_name],
           start_key: request.headers["Idempotency-Key"],
-          game_room: room
+          game_room: room,
+          avatar_id:
         )
         render(
           json: { data: {
             session_id: session.id,
             learner_name: session.learner_name,
+            avatar_id: session.avatar_id,
             room: Activities::Serializers::GameRoomSerializer.call(room, participant_session: session)
           } },
           status: repeated ? :ok : :created
@@ -75,14 +80,25 @@ module Api
 
         session = room.play_sessions.find_by(id: params[:session_id])
         return render_not_found unless session
-        return render_error(code: "name_locked", message: "Your name cannot be changed after you answer this round.", status: :conflict) if session.responses.any? { |response| response["question_id"] == room.activity_version.question_snapshot[room.current_question_index]&.fetch("id") }
+        attributes = params.require(:participant).permit(:learner_name, :avatar_id)
+        return render_error(code: "validation_failed", message: "Choose a name or character to update.", status: :unprocessable_entity) if attributes.empty?
 
-        attributes = params.require(:participant).permit(:learner_name)
-        name = attributes[:learner_name].to_s.strip
-        return render_error(code: "invalid_name", message: "Choose a name between 1 and 80 characters.", status: :unprocessable_entity) unless name.length.between?(1, 80)
+        if attributes.key?(:learner_name)
+          return render_error(code: "name_locked", message: "Your name cannot be changed after you answer this round.", status: :conflict) if session.responses.any? { |response| response["question_id"] == room.activity_version.question_snapshot[room.current_question_index]&.fetch("id") }
 
-        session.update!(learner_name: name)
-        render json: { data: { learner_name: session.learner_name } }
+          name = attributes[:learner_name].to_s.strip
+          return render_error(code: "invalid_name", message: "Choose a name between 1 and 80 characters.", status: :unprocessable_entity) unless name.length.between?(1, 80)
+
+          session.learner_name = name
+        end
+        if attributes.key?(:avatar_id)
+          return render_invalid_avatar unless PlaySession::AVATAR_IDS.include?(attributes[:avatar_id])
+
+          session.avatar_id = attributes[:avatar_id]
+        end
+
+        session.save!
+        render json: { data: { learner_name: session.learner_name, avatar_id: session.avatar_id } }
       rescue ActionController::ParameterMissing
         render_error(code: "validation_failed", message: "A learner name is required.", status: :unprocessable_entity)
       end
@@ -170,6 +186,14 @@ module Api
           code: "invalid_room_transition",
           message: "The room is no longer in a state that allows this action.",
           status: :conflict
+        )
+      end
+
+      def render_invalid_avatar
+        render_error(
+          code: "invalid_avatar",
+          message: "Choose one of the available learner characters.",
+          status: :unprocessable_entity
         )
       end
     end

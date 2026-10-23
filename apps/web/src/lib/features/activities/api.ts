@@ -9,6 +9,7 @@ import type {
 	PublishedActivity,
 	QuestionDraft
 } from './types';
+import type { LearnerCharacterId } from './characters.js';
 
 type ApiEnvelope<T> = { data: T };
 type ApiErrorEnvelope = { error?: { code?: string; message?: string } };
@@ -225,6 +226,7 @@ export function fetchGameRoom(roomCode: string, sessionId?: string) {
 export function joinGameRoom(input: {
 	roomCode: string;
 	learnerName: string;
+	avatarId: LearnerCharacterId;
 	idempotencyKey: string;
 }) {
 	return request<JoinedGameRoom>(
@@ -232,7 +234,9 @@ export function joinGameRoom(input: {
 		{
 			method: 'POST',
 			headers: { 'Idempotency-Key': input.idempotencyKey },
-			body: JSON.stringify({ participant: { learner_name: input.learnerName } })
+			body: JSON.stringify({
+				participant: { learner_name: input.learnerName, avatar_id: input.avatarId }
+			})
 		}
 	);
 }
@@ -247,6 +251,20 @@ export function renameGameRoomParticipant(input: {
 		{
 			method: 'PATCH',
 			body: JSON.stringify({ participant: { learner_name: input.learnerName } })
+		}
+	);
+}
+
+export function updateGameRoomCharacter(input: {
+	roomCode: string;
+	sessionId: string;
+	avatarId: LearnerCharacterId;
+}) {
+	return request<{ learner_name: string; avatar_id: LearnerCharacterId }>(
+		`/api/v1/game_rooms/${encodeURIComponent(input.roomCode)}/participants/${encodeURIComponent(input.sessionId)}`,
+		{
+			method: 'PATCH',
+			body: JSON.stringify({ participant: { avatar_id: input.avatarId } })
 		}
 	);
 }

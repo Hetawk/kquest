@@ -11,6 +11,7 @@ module Activities
           question_id = current_question&.fetch("id")
           {
             learner_name: participant_session.learner_name,
+            avatar_id: participant_session.avatar_id,
             answered: question_id.present? &&
               participant_session.responses.any? { |response| response["question_id"] == question_id }
           }
@@ -36,6 +37,7 @@ module Activities
           participants: sessions.map do |session|
             {
               learner_name: session.learner_name,
+              avatar_id: session.avatar_id,
               completed: session.completed?,
               answered: current_question.present? &&
                 session.responses.any? { |response| response["question_id"] == current_question.fetch("id") }
@@ -83,6 +85,7 @@ module Activities
           entry = {
             session_id: session.id,
             learner_name: session.learner_name,
+            avatar_id: session.avatar_id,
             score: attempt ? attempt.score : responses.sum { |response| response["points_awarded"].to_i },
             max_score: attempt&.max_score,
             correct_count: responses.count { |response| response["points_awarded"].to_i.positive? },
