@@ -117,6 +117,47 @@ export type GameRoom = {
 	standings_final: boolean;
 };
 
+export type GameRoomReport = {
+	room_code: string;
+	title: string;
+	completed_at: string | null;
+	participant_count: number;
+	question_count: number;
+	average_score: number;
+	max_score: number;
+	accuracy_percent: number;
+	questions: Array<{
+		id: string;
+		number: number;
+		prompt: string;
+		points_possible: number;
+		correct_answer: string;
+		participant_count: number;
+		answered_count: number;
+		correct_count: number;
+		missed_count: number;
+		timed_out_count: number;
+		accuracy_percent: number;
+	}>;
+	participants: Array<{
+		learner_name: string;
+		avatar_id: LearnerCharacterId;
+		rank: number;
+		score: number;
+		max_score: number;
+		questions: Array<{
+			question_id: string;
+			selected_answer: string;
+			correct_answer: string;
+			is_correct: boolean;
+			timed_out: boolean;
+			points_awarded: number;
+			points_possible: number;
+			response_time_ms: number | null;
+		}>;
+	}>;
+};
+
 export type PlaySession = {
 	id: string;
 	question_index: number;

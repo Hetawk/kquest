@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { getLearnerCharacter } from '../characters.js';
 
-	let { avatarId, size = 'medium' }: { avatarId?: string | null; size?: 'small' | 'medium' } =
-		$props();
+	let {
+		avatarId,
+		size = 'medium'
+	}: { avatarId?: string | null; size?: 'small' | 'medium' | 'large' } = $props();
 
 	const character = $derived(getLearnerCharacter(avatarId));
 </script>
@@ -10,6 +12,7 @@
 <span
 	class="character-avatar"
 	class:small={size === 'small'}
+	class:large={size === 'large'}
 	style:--character-color={character.color}
 	aria-hidden="true"
 >
@@ -34,5 +37,11 @@
 		width: 2rem;
 		height: 2rem;
 		font-size: 1.1rem;
+	}
+
+	.character-avatar.large {
+		width: 3.5rem;
+		height: 3.5rem;
+		font-size: 2rem;
 	}
 </style>

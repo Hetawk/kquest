@@ -4,6 +4,9 @@ module Assessments
       class InvalidTransition < StandardError
       end
 
+      class QuestionNotExpired < StandardError
+      end
+
       def self.start!(room:)
         GameRoom.transaction do
           room.lock!
@@ -51,6 +54,24 @@ module Assessments
           else
             raise InvalidTransition
           end
+        end
+
+        room
+      end
+
+      def self.expire!(room:)
+        GameRoom.transaction do
+          room.lock!
+          raise InvalidTransition unless room.status == "active"
+          next if room.round_phase == "leaderboard"
+          raise InvalidTransition unless room.round_phase == "question"
+
+          question = room.activity_version.question_snapshot.fetch(room.current_question_index)
+          time_limit = Questions::Types::SingleChoice.live_time_limit_seconds(question)
+          elapsed = Time.current - room.question_started_at
+          raise QuestionNotExpired unless time_limit.positive? && elapsed >= time_limit
+
+          room.update!(round_phase: "leaderboard")
         end
 
         room

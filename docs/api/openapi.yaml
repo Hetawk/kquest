@@ -730,6 +730,57 @@ paths:
                     $ref: "#/components/schemas/GameRoom"
         "404":
           $ref: "#/components/responses/NotFound"
+  /game_rooms/{room_code}/expire:
+    post:
+      operationId: expireGameRoomQuestion
+      summary: Move an expired live question to the standings stage
+      description: The server accepts this transition only after the shared question timer expires.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The room is at the round standings stage.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GameRoom"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "409":
+          description: The timer has not expired or the room cannot transition.
+  /game_rooms/{room_code}/report:
+    get:
+      operationId: getGameRoomReport
+      summary: Get detailed results for a completed room
+      description: Host-only report with answer-level data and per-question aggregates.
+      security:
+        - sessionCookie: []
+      parameters:
+        - $ref: "#/components/parameters/RoomCode"
+      responses:
+        "200":
+          description: Detailed final results and learning statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/GameRoomReport"
+        "401":
+          $ref: "#/components/responses/AuthenticationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The room has not completed.
   /game_rooms/{room_code}/participants:
     post:
       operationId: joinGameRoom
@@ -1666,6 +1717,146 @@ components:
           $ref: "#/components/schemas/LearnerCharacterId"
         room:
           $ref: "#/components/schemas/GameRoom"
+    GameRoomReport:
+      type: object
+      required:
+        - room_code
+        - title
+        - participant_count
+        - question_count
+        - average_score
+        - max_score
+        - accuracy_percent
+        - questions
+        - participants
+      properties:
+        room_code:
+          type: string
+        title:
+          type: string
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+        participant_count:
+          type: integer
+          minimum: 0
+        question_count:
+          type: integer
+          minimum: 0
+        average_score:
+          type: number
+          minimum: 0
+        max_score:
+          type: integer
+          minimum: 0
+        accuracy_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/GameRoomReportQuestion"
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/GameRoomReportParticipant"
+    GameRoomReportQuestion:
+      type: object
+      required:
+        - id
+        - number
+        - prompt
+        - points_possible
+        - correct_answer
+        - participant_count
+        - answered_count
+        - correct_count
+        - missed_count
+        - timed_out_count
+        - accuracy_percent
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          minimum: 1
+        prompt:
+          type: string
+        points_possible:
+          type: integer
+        correct_answer:
+          type: string
+        participant_count:
+          type: integer
+          minimum: 0
+        answered_count:
+          type: integer
+          minimum: 0
+        correct_count:
+          type: integer
+          minimum: 0
+        missed_count:
+          type: integer
+          minimum: 0
+        timed_out_count:
+          type: integer
+          minimum: 0
+        accuracy_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+    GameRoomReportParticipant:
+      type: object
+      required: [learner_name, avatar_id, rank, score, max_score, questions]
+      properties:
+        learner_name:
+          type: string
+        avatar_id:
+          $ref: "#/components/schemas/LearnerCharacterId"
+        rank:
+          type: integer
+          minimum: 1
+        score:
+          type: integer
+          minimum: 0
+        max_score:
+          type: integer
+          minimum: 0
+        questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/GameRoomReportAnswer"
+    GameRoomReportAnswer:
+      type: object
+      required:
+        - question_id
+        - selected_answer
+        - correct_answer
+        - is_correct
+        - timed_out
+        - points_awarded
+        - points_possible
+      properties:
+        question_id:
+          type: string
+          format: uuid
+        selected_answer:
+          type: string
+        correct_answer:
+          type: string
+        is_correct:
+          type: boolean
+        timed_out:
+          type: boolean
+        points_awarded:
+          type: integer
+        points_possible:
+          type: integer
+        response_time_ms:
+          type: [integer, "null"]
+          minimum: 0
     ErrorResponse:
       type: object
       required: [error]

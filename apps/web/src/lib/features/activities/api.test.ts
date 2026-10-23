@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	answerPlayQuestion,
+	expireGameRoom,
 	fetchActivity,
+	fetchGameRoomReport,
 	joinGameRoom,
 	listCreatorActivities,
 	startPlaySession,
@@ -18,6 +20,33 @@ function jsonResponse(body: unknown, status = 200) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('learning journey API client', () => {
+	it('fetches host-only detailed live-room results', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(
+			jsonResponse({
+				data: {
+					room_code: 'ABCD23',
+					title: 'A quest',
+					completed_at: null,
+					participant_count: 0,
+					question_count: 0,
+					average_score: 0,
+					max_score: 0,
+					accuracy_percent: 0,
+					questions: [],
+					participants: []
+				}
+			})
+		);
+		vi.stubGlobal('fetch', fetchMock);
+
+		await fetchGameRoomReport('ABCD23');
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/v1/game_rooms/ABCD23/report',
+			expect.objectContaining({ credentials: 'same-origin' })
+		);
+	});
+
 	it('normalizes and encodes a learner game code in requests', async () => {
 		const fetchMock = vi.fn().mockResolvedValue(
 			jsonResponse({
@@ -256,6 +285,23 @@ describe('learning journey API client', () => {
 		expect(fetchMock).toHaveBeenCalledWith(
 			'/api/v1/activities',
 			expect.objectContaining({ credentials: 'same-origin' })
+		);
+	});
+
+	it('requests the server-confirmed expired-round transition', async () => {
+		const fetchMock = vi.fn((input: string | URL | Request) => {
+			if (String(input).endsWith('/auth/csrf')) {
+				return Promise.resolve(jsonResponse({ data: { token: 'csrf-token' } }));
+			}
+			return Promise.resolve(jsonResponse({ data: { round_phase: 'leaderboard' } }));
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		await expireGameRoom('ABCD23');
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/api/v1/game_rooms/ABCD23/expire',
+			expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
 		);
 	});
 });

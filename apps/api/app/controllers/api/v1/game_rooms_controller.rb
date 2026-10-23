@@ -1,7 +1,7 @@
 module Api
   module V1
     class GameRoomsController < ApplicationController
-      before_action :require_current_user, only: %i[create start advance]
+      before_action :require_current_user, only: %i[create start advance expire report]
 
       def create
         return unless current_user
@@ -133,6 +133,32 @@ module Api
         }
       rescue Assessments::Services::AdvanceGameRoom::InvalidTransition
         render_room_transition_error
+      end
+
+      def expire
+        room = find_host_room
+        return unless room
+
+        room = Assessments::Services::AdvanceGameRoom.expire!(room:)
+        render json: {
+          data: Activities::Serializers::GameRoomSerializer.call(room, include_participant_keys: true)
+        }
+      rescue Assessments::Services::AdvanceGameRoom::QuestionNotExpired
+        render_error(
+          code: "question_not_expired",
+          message: "The shared question timer has not expired yet.",
+          status: :conflict
+        )
+      rescue Assessments::Services::AdvanceGameRoom::InvalidTransition
+        render_room_transition_error
+      end
+
+      def report
+        room = find_host_room
+        return unless room
+        return render_room_transition_error unless room.status == "completed"
+
+        render json: { data: Activities::Serializers::GameRoomReportSerializer.call(room) }
       end
 
       def answer

@@ -612,7 +612,10 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
 
     get "/api/v1/game_rooms/#{room_code}"
     assert_response :success
-    assert_equal "unicorn", response.parsed_body.dig("data", "participants").first.fetch("avatar_id")
+    jordan = response.parsed_body.dig("data", "participants").find do |participant|
+      participant.fetch("learner_name") == "Jordan Updated"
+    end
+    assert_equal "unicorn", jordan.fetch("avatar_id")
 
     post "/api/v1/game_rooms/#{room_code}/start",
       headers: { "X-CSRF-Token" => fetch_csrf_token },
@@ -690,6 +693,55 @@ class LearningJourneyTest < ActionDispatch::IntegrationTest
     assert_equal 2, Attempt.where(game_room_id: attempt.game_room_id).count
     assert_equal definition.fetch(:correct_option_ids).sort, attempt.responses.first.fetch("option_ids").sort
     assert_operator attempt.score, :>, 100
+
+    get "/api/v1/game_rooms/#{room_code}/report"
+    assert_response :success
+    report = response.parsed_body.fetch("data")
+    assert_equal "The Solar System Sprint", report.fetch("title")
+    assert_equal 2, report.fetch("participant_count")
+    assert_equal 1, report.fetch("question_count")
+    assert_equal 50, report.fetch("accuracy_percent")
+    winner = report.fetch("participants").first
+    assert_equal "Jordan Updated", winner.fetch("learner_name")
+    assert_equal "unicorn", winner.fetch("avatar_id")
+    assert_equal "Mars; Jupiter", winner.dig("questions", 0, "selected_answer")
+    assert_equal true, winner.dig("questions", 0, "is_correct")
+    assert_equal "Mars; Jupiter", report.dig("questions", 0, "correct_answer")
+    assert_equal 1, report.dig("questions", 0, "correct_count")
+    assert_equal 1, report.dig("questions", 0, "answered_count")
+    assert_equal 0, report.dig("questions", 0, "missed_count")
+    assert_equal 1, report.dig("questions", 0, "timed_out_count")
+  end
+
+  test "timer expiration moves a live round to standings without a host advance" do
+    activity_id = create_activity(questions: [ question_definition(time_limit_seconds: 10) ])
+    publish_activity(activity_id)
+    room_code = create_game_room(activity_id)
+    join_game_room(room_code:, name: "Jordan")
+    start_time = Time.current
+    travel_to(start_time, with_usec: true) { start_game_room(room_code:) }
+
+    travel_to(start_time + 9.seconds, with_usec: true) do
+      post "/api/v1/game_rooms/#{room_code}/expire",
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :conflict
+      assert_equal "question_not_expired", response.parsed_body.dig("error", "code")
+    end
+
+    travel_to(start_time + 10.seconds, with_usec: true) do
+      post "/api/v1/game_rooms/#{room_code}/expire",
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal "leaderboard", response.parsed_body.dig("data", "round_phase")
+
+      post "/api/v1/game_rooms/#{room_code}/expire",
+        headers: { "X-CSRF-Token" => fetch_csrf_token },
+        as: :json
+      assert_response :success
+      assert_equal "leaderboard", response.parsed_body.dig("data", "round_phase")
+    end
   end
 
   test "host navigation preserves answer locks and previously started question timers" do

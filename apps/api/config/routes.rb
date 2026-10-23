@@ -30,6 +30,8 @@ Rails.application.routes.draw do
       patch "game_rooms/:room_code/participants/:session_id", to: "game_rooms#update"
       post "game_rooms/:room_code/start", to: "game_rooms#start"
       post "game_rooms/:room_code/advance", to: "game_rooms#advance"
+      post "game_rooms/:room_code/expire", to: "game_rooms#expire"
+      get "game_rooms/:room_code/report", to: "game_rooms#report"
       post "game_rooms/:room_code/participants/:session_id/answers", to: "game_rooms#answer"
       get "play/:share_code", to: "play#show", as: :play
       get "play/:share_code/leaderboard", to: "play_leaderboards#show"

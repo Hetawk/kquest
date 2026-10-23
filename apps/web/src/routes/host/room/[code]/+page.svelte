@@ -5,7 +5,13 @@
 	import Podium from '#lib/features/activities/components/Podium.svelte';
 	import CharacterAvatar from '#lib/features/activities/components/CharacterAvatar.svelte';
 	import SoundControl from '#lib/features/audio/SoundControl.svelte';
-	import { advanceGameRoom, fetchGameRoom, startGameRoom } from '#lib/features/activities/api.js';
+	import {
+		advanceGameRoom,
+		ApiRequestError,
+		expireGameRoom,
+		fetchGameRoom,
+		startGameRoom
+	} from '#lib/features/activities/api.js';
 	import type { GameRoom } from '#lib/features/activities/types.js';
 	import type { PageProps } from './$types';
 
@@ -28,6 +34,8 @@
 	let liveAudio: import('#lib/features/audio/GameAudio.js').GameAudio | null = null;
 	let remaining = $state(0);
 	let deadlineAt = 0;
+	let autoExpiryKey = '';
+	let autoExpiryRetryAt = 0;
 	let lastAudioQuestionIndex = -1;
 	let lastAudioPhase: GameRoom['round_phase'] | null = null;
 	let lastTickSecond = -1;
@@ -114,6 +122,16 @@
 			)
 				return;
 			remaining = Math.max(0, (deadlineAt - performance.now()) / 1000);
+			const expiryKey = `${room.room_code}:${room.question_index}`;
+			if (
+				remaining === 0 &&
+				!busy &&
+				autoExpiryKey !== expiryKey &&
+				performance.now() >= autoExpiryRetryAt
+			) {
+				autoExpiryKey = expiryKey;
+				void expireRound();
+			}
 		}, 150);
 		return () => {
 			disposed = true;
@@ -227,6 +245,26 @@
 		}
 	}
 
+	async function expireRound() {
+		if (busy || !room || room.status !== 'active' || room.round_phase !== 'question') return;
+		busy = true;
+		try {
+			const requestStartedAt = performance.now();
+			updateRoom(await expireGameRoom(roomCode), requestStartedAt);
+		} catch (cause) {
+			if (cause instanceof ApiRequestError && cause.code === 'question_not_expired') {
+				autoExpiryKey = '';
+				autoExpiryRetryAt = performance.now() + 450;
+			} else {
+				autoExpiryKey = '';
+				autoExpiryRetryAt = performance.now() + 3000;
+				error = cause instanceof Error ? cause.message : 'The expired round could not be closed.';
+			}
+		} finally {
+			busy = false;
+		}
+	}
+
 	async function selectQuestion(questionIndex: number) {
 		if (
 			busy ||
@@ -245,6 +283,11 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	function previousQuestion() {
+		if (!room || room.question_index === 0) return;
+		void selectQuestion(room.question_index - 1);
 	}
 
 	async function copyValue(kind: 'code' | 'link') {
@@ -345,6 +388,7 @@
 		}
 
 		room = updated;
+		if (updated.status !== 'active' || updated.round_phase !== 'question') autoExpiryKey = '';
 		const adjusted = Math.max(
 			0,
 			updated.time_remaining_seconds - (performance.now() - requestStartedAt) / 1000
@@ -528,6 +572,15 @@
 						<div class="review-heading">
 							<p class="eyebrow">ROUND {room.question_index + 1} COMPLETE</p>
 							<div class="review-tools">
+								<button
+									class="previous-question-button"
+									type="button"
+									onclick={previousQuestion}
+									disabled={busy || room.question_index === 0}
+									aria-label="Go to previous question"
+								>
+									<span aria-hidden="true">←</span> Previous
+								</button>
 								<label class="question-picker">
 									<span>Question</span>
 									<select
@@ -589,6 +642,15 @@
 				{:else if room.status === 'active' && room.current_question && room.round_phase === 'answer'}
 					<section class="question-card answer-review-card" aria-labelledby="answer-review-title">
 						<div class="question-topline">
+							<button
+								class="previous-question-button"
+								type="button"
+								onclick={previousQuestion}
+								disabled={busy || room.question_index === 0}
+								aria-label="Go to previous question"
+							>
+								<span aria-hidden="true">←</span> Previous
+							</button>
 							<label class="question-picker">
 								<span>Question</span>
 								<select
@@ -635,6 +697,15 @@
 				{:else if room.status === 'active' && room.current_question}
 					<div class="question-card">
 						<div class="question-topline">
+							<button
+								class="previous-question-button"
+								type="button"
+								onclick={previousQuestion}
+								disabled={busy || room.question_index === 0}
+								aria-label="Go to previous question"
+							>
+								<span aria-hidden="true">←</span> Previous
+							</button>
 							<label class="question-picker">
 								<span>Question</span>
 								<select
@@ -687,7 +758,7 @@
 							onclick={advance}
 							disabled={busy}
 						>
-							{busy ? 'Closing round…' : 'Close round and view leaderboard'}
+							{busy ? 'Opening standings…' : 'View round standings'}
 							<span aria-hidden="true">→</span>
 						</button>
 						<p class="helper-note">
@@ -713,6 +784,12 @@
 										size="small"
 									/><strong>{entry.learner_name}</strong><b>{entry.score} pts</b>
 								</div>
+								<a
+									class="button button-primary results-detail-link"
+									href={resolve('/host/room/[code]/results', { code: roomCode })}
+								>
+									View detailed results <span aria-hidden="true">→</span>
+								</a>
 							{/each}
 						</div>
 					</div>
@@ -1226,6 +1303,29 @@
 		flex-wrap: wrap;
 		justify-content: flex-end;
 	}
+	.previous-question-button {
+		display: inline-flex;
+		min-height: 2.25rem;
+		align-items: center;
+		gap: 0.35rem;
+		padding: 0.45rem 0.7rem;
+		border: 1px solid var(--line);
+		border-radius: 0.55rem;
+		background: #fff;
+		color: var(--navy);
+		font: inherit;
+		font-size: 0.68rem;
+		font-weight: 800;
+		cursor: pointer;
+	}
+	.previous-question-button:hover:not(:disabled) {
+		border-color: #c8a061;
+		background: #fffaf0;
+	}
+	.previous-question-button:disabled {
+		cursor: not-allowed;
+		opacity: 0.48;
+	}
 	.review-hero {
 		display: grid;
 		justify-items: center;
@@ -1529,8 +1629,19 @@
 		color: var(--gold-deep);
 		font-weight: 850;
 	}
+	.standing-row > span:first-child {
+		color: var(--gold-deep);
+	}
 	.standing-row b {
 		color: var(--navy);
+	}
+	.results-detail-link {
+		display: flex;
+		width: fit-content;
+		align-items: center;
+		gap: 0.55rem;
+		margin-top: 1.35rem;
+		text-decoration: none;
 	}
 	.leaderboard-list {
 		display: grid;

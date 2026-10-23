@@ -7,7 +7,8 @@ import type {
 	PlaySession,
 	PlaySessionProgress,
 	PublishedActivity,
-	QuestionDraft
+	QuestionDraft,
+	GameRoomReport
 } from './types';
 import type { LearnerCharacterId } from './characters.js';
 
@@ -281,6 +282,17 @@ export function advanceGameRoom(roomCode: string, questionIndex?: number) {
 		method: 'POST',
 		body: JSON.stringify(questionIndex === undefined ? {} : { question_index: questionIndex })
 	});
+}
+
+export function expireGameRoom(roomCode: string) {
+	return request<GameRoom>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}/expire`, {
+		method: 'POST',
+		body: JSON.stringify({})
+	});
+}
+
+export function fetchGameRoomReport(roomCode: string) {
+	return request<GameRoomReport>(`/api/v1/game_rooms/${encodeURIComponent(roomCode)}/report`);
 }
 
 export function answerGameRoomQuestion(input: {
