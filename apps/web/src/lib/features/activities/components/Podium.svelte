@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { LeaderboardEntry } from '../types';
 	import CharacterAvatar from './CharacterAvatar.svelte';
+	import PodiumScene from './PodiumScene.svelte';
 
 	let {
 		entries,
@@ -17,6 +18,10 @@
 		entries.find((entry) => entry.rank === 1),
 		entries.find((entry) => entry.rank === 3)
 	]);
+	const podiumCharacterKey = $derived(
+		podiumPlaces.map((entry) => (entry ? (entry.avatar_id ?? 'fox') : '-')).join('|')
+	);
+	let renderedCharacterKey = $state('');
 </script>
 
 <section class="podium-card" aria-labelledby="podium-title">
@@ -36,17 +41,25 @@
 		<div class="podium-stage" aria-label="Top three players">
 			<span class="stage-sparkle sparkle-one" aria-hidden="true">✦</span>
 			<span class="stage-sparkle sparkle-two" aria-hidden="true">✧</span>
-			<div class="podium-places">
+			<div class="podium-places" class:scene-ready={renderedCharacterKey === podiumCharacterKey}>
+				{#key podiumCharacterKey}
+					<PodiumScene
+						characterIds={podiumPlaces.map((entry) => (entry ? (entry.avatar_id ?? 'fox') : null))}
+						onReady={() => (renderedCharacterKey = podiumCharacterKey)}
+						onFailure={() => (renderedCharacterKey = '')}
+					/>
+				{/key}
 				{#each podiumPlaces as entry, index (`${entry?.rank ?? 'empty'}-${index}`)}
 					{@const rank = index === 1 ? 1 : index === 0 ? 2 : 3}
 					{#if entry}
-						<article class="winner" class:place-first={rank === 1} class:place-second={rank === 2}>
+						<article
+							class="winner"
+							class:place-first={rank === 1}
+							class:place-second={rank === 2}
+							class:place-third={rank === 3}
+						>
 							<div class="winner-avatar">
-								{#if entry.avatar_id}
-									<CharacterAvatar avatarId={entry.avatar_id} size="large" />
-								{:else}
-									<span class="generic-avatar" aria-hidden="true">✦</span>
-								{/if}
+								<CharacterAvatar avatarId={entry.avatar_id} size="large" />
 							</div>
 							<div class="podium-block" class:gold-block={rank === 1}>
 								<span class="place-label"
@@ -140,6 +153,7 @@
 
 	.podium-places {
 		position: relative;
+		position: relative;
 		display: grid;
 		height: 15.3rem;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -160,16 +174,16 @@
 		animation: podium-arrive 600ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
 	}
 
-	.winner:nth-child(1) {
+	.winner.place-second {
 		animation-delay: 120ms;
 	}
 
-	.winner:nth-child(2) {
+	.winner.place-first {
 		height: 100%;
 		animation-delay: 0ms;
 	}
 
-	.winner:nth-child(3) {
+	.winner.place-third {
 		animation-delay: 240ms;
 	}
 
@@ -182,24 +196,16 @@
 		animation: avatar-pop 500ms 220ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
 	}
 
-	.winner:nth-child(1) .winner-avatar {
+	.scene-ready .winner-avatar {
+		visibility: hidden;
+	}
+
+	.winner.place-second .winner-avatar {
 		animation-delay: 320ms;
 	}
 
-	.winner:nth-child(3) .winner-avatar {
+	.winner.place-third .winner-avatar {
 		animation-delay: 440ms;
-	}
-
-	.generic-avatar {
-		display: grid;
-		width: 3.5rem;
-		height: 3.5rem;
-		place-items: center;
-		border: 1px solid #ded6c7;
-		border-radius: 50%;
-		background: #fff;
-		color: #a37636;
-		font-size: 1.5rem;
 	}
 
 	.podium-block,
@@ -250,7 +256,7 @@
 		background: linear-gradient(180deg, #fff3d2, #e8ca8d);
 	}
 
-	.winner:nth-child(3) .podium-block {
+	.winner.place-third .podium-block {
 		border-color: #c88e68;
 		background: linear-gradient(145deg, #efd0b8, #cc936d);
 		box-shadow:
@@ -258,7 +264,7 @@
 			0 0.75rem 1.15rem rgb(51 50 45 / 10%);
 	}
 
-	.winner:nth-child(3) .podium-block::before {
+	.winner.place-third .podium-block::before {
 		border-color: #d8aa8c;
 		background: linear-gradient(180deg, #ffecdc, #e7b99b);
 	}

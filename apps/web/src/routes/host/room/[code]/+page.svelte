@@ -784,13 +784,16 @@
 										size="small"
 									/><strong>{entry.learner_name}</strong><b>{entry.score} pts</b>
 								</div>
+							{/each}
+							<div class="results-report-cta">
+								<p>Explore every answer, review question stats, and download the full results.</p>
 								<a
 									class="button button-primary results-detail-link"
 									href={resolve('/host/room/[code]/results', { code: roomCode })}
 								>
-									View detailed results <span aria-hidden="true">→</span>
+									View full game report <span aria-hidden="true">→</span>
 								</a>
-							{/each}
+							</div>
 						</div>
 					</div>
 				{/if}
@@ -1640,8 +1643,25 @@
 		width: fit-content;
 		align-items: center;
 		gap: 0.55rem;
-		margin-top: 1.35rem;
 		text-decoration: none;
+	}
+	.results-report-cta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.8rem 1.2rem;
+		margin-top: 1rem;
+		padding: 1rem;
+		border: 1px solid #e7dfd0;
+		border-radius: 0.85rem;
+		background: linear-gradient(135deg, #fffaf0, #fff);
+	}
+	.results-report-cta p {
+		margin: 0;
+		color: var(--ink-muted);
+		font-size: 0.74rem;
+		line-height: 1.5;
 	}
 	.leaderboard-list {
 		display: grid;
